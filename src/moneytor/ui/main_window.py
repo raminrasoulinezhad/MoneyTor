@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 from moneytor.domain.enums import Currency
 from moneytor.domain.models import Person
 from moneytor.fx.provider import FxProvider
-from moneytor.ui.theme import Theme, stylesheet_for
+from moneytor.ui.theme import Theme, stylesheet_for, tokens_for
 from moneytor.ui.viewmodels import SidebarModel, view_model_for
 from moneytor.ui.views.dashboard import DashboardView
 from moneytor.ui.widgets.sidebar import Sidebar
@@ -76,9 +76,10 @@ class MainWindow(QMainWindow):
         self.dashboard.set_view_model(view_model)
 
     def apply_theme(self, theme: Theme) -> None:
-        """Apply ``theme`` stylesheet across the application."""
+        """Apply ``theme`` stylesheet and chart palette across the app."""
         self._theme = theme
         self.setStyleSheet(stylesheet_for(theme))
+        self.dashboard.set_theme_tokens(tokens_for(theme))
 
     def toggle_theme(self) -> None:
         """Switch between dark and light themes."""

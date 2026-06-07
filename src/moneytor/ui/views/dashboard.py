@@ -8,7 +8,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from moneytor.ui.viewmodels import DashboardViewModel
+from moneytor.ui.theme.tokens import DARK, ThemeTokens
+from moneytor.ui.viewmodels import DashboardViewModel, HoldingRow
 from moneytor.ui.widgets.chart_panel import ChartPanel
 from moneytor.ui.widgets.holdings_table import HoldingsTable
 from moneytor.ui.widgets.kpi_card import KpiCard
@@ -30,20 +31,27 @@ class DashboardView(QWidget):
         self._kpi_cards: list[KpiCard] = []
         self._outer.addLayout(self._kpi_row)
 
+        self._tokens: ThemeTokens = DARK
+        self._last_rows: tuple[HoldingRow, ...] = ()
+
         self.chart_panel = ChartPanel()
         self._outer.addWidget(self.chart_panel)
 
         self.table = HoldingsTable()
         self._outer.addWidget(self.table, stretch=1)
 
+    def set_theme_tokens(self, tokens: ThemeTokens) -> None:
+        """Set the palette used for the chart and re-render it if data exists."""
+        self._tokens = tokens
+        if self._last_rows:
+            self.chart_panel.set_allocation(self._last_rows, self._tokens)
+
     def set_view_model(self, view_model: DashboardViewModel) -> None:
         """Render a full view-model, rebuilding KPI cards and table rows."""
         self._rebuild_kpis(view_model)
         self.table.set_rows(view_model.rows)
-        if not view_model.rows:
-            self.chart_panel.set_placeholder_text("No holdings for this selection.")
-        else:
-            self.chart_panel.set_placeholder_text("Interactive chart arrives in Phase 7.")
+        self._last_rows = view_model.rows
+        self.chart_panel.set_allocation(view_model.rows, self._tokens)
 
     def set_loading(self, loading: bool) -> None:
         """Toggle a simple loading state on the chart panel."""

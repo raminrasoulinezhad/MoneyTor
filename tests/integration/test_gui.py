@@ -60,6 +60,22 @@ def test_sidebar_filter_updates_table(qtbot) -> None:
     assert window.dashboard.table.rowCount() == 2  # SHOP + VFV only
 
 
+def test_chart_panel_shows_summary_fallback_when_headless(qtbot) -> None:
+    # Under the offscreen platform, the panel falls back to a text summary.
+    window = _window(qtbot)
+    body = window.dashboard.chart_panel._body
+    assert body.isVisible() or body.text()  # populated
+    assert "Allocation" in body.text()
+
+
+def test_chart_panel_empty_selection_message(qtbot) -> None:
+    window = _window(qtbot)
+    window._on_selection_changed(frozenset())
+    # Selecting nothing means "show all", so still has holdings; force empty:
+    window.dashboard.chart_panel.set_allocation(())
+    assert "No holdings" in window.dashboard.chart_panel._body.text()
+
+
 def test_fetch_worker_reports_success(qtbot) -> None:
     worker = FetchWorker(task=lambda: "done")
     with qtbot.waitSignal(worker.succeeded, timeout=2000) as blocker:

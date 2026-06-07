@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 authors = [{ name = "Seyedramin Rasoulinezhad" }]
 dependencies = [
+    "plotly>=6.8.0",
     "pyside6>=6.11.1",
     "python-dotenv>=1.0",
 ]
@@ -79,7 +80,7 @@ disallow_untyped_calls = false
 warn_return_any = false
 
 [[tool.mypy.overrides]]
-module = "PySide6.*"
+module = ["PySide6.*", "plotly.*"]
 ignore_missing_imports = true
 
 [tool.pylint.main]
