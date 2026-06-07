@@ -74,4 +74,9 @@ source-roots = ["src"]
 
 [tool.pylint."messages control"]
 # Defer opinionated docstring/format rules to ruff; keep pylint for deep checks.
-disable = ["missing-module-docstring", "missing-class-docstring", "missing-function-docstring"]
+disable = [
+    "missing-module-docstring",
+    "missing-class-docstring",
+    "missing-function-docstring",
+    "too-few-public-methods",
+]
