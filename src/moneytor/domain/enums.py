@@ -21,3 +21,27 @@ class Institution(StrEnum):
 
     WEALTHSIMPLE = "wealthsimple"
     QUESTRADE = "questrade"
+
+
+class AccountType(StrEnum):
+    """Registered and non-registered account types."""
+
+    TFSA = "tfsa"
+    RRSP = "rrsp"
+    SPOUSAL_RRSP = "spousal_rrsp"
+    MARGIN = "margin"
+    MANAGED = "managed"
+    GIC = "gic"
+    CASH = "cash"
+
+
+class AssetClass(StrEnum):
+    """Broad asset classification for a holding."""
+
+    EQUITY = "equity"
+    ETF = "etf"
+    CASH = "cash"
+    GIC = "gic"
+    FIXED_INCOME = "fixed_income"
+    CRYPTO = "crypto"
+    OTHER = "other"
