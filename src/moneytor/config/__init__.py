@@ -1,0 +1,1 @@
+"""MoneyTor config package."""

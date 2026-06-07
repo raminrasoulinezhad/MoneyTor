@@ -1,0 +1,1 @@
+"""MoneyTor ui package."""
