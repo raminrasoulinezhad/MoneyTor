@@ -1,0 +1,44 @@
+[
+  {
+    "id": "qt-tfsa-ramin",
+    "person_id": "ramin",
+    "institution": "questrade",
+    "account_type": "tfsa",
+    "cash": { "amount": "1500.00", "currency": "CAD" },
+    "holdings": [
+      {
+        "symbol": "SHOP",
+        "exchange": "TSX",
+        "asset_class": "equity",
+        "quantity": "10",
+        "book_value": { "amount": "1000.00", "currency": "CAD" },
+        "market_value": { "amount": "1200.50", "currency": "CAD" }
+      },
+      {
+        "symbol": "VFV",
+        "exchange": "TSX",
+        "asset_class": "etf",
+        "quantity": "25",
+        "book_value": { "amount": "2500.00", "currency": "CAD" },
+        "market_value": { "amount": "3100.00", "currency": "CAD" }
+      }
+    ]
+  },
+  {
+    "id": "ws-margin-ramin",
+    "person_id": "ramin",
+    "institution": "wealthsimple",
+    "account_type": "margin",
+    "cash": { "amount": "300.00", "currency": "USD" },
+    "holdings": [
+      {
+        "symbol": "AAPL",
+        "exchange": "NASDAQ",
+        "asset_class": "equity",
+        "quantity": "5",
+        "book_value": { "amount": "800.00", "currency": "USD" },
+        "market_value": { "amount": "950.75", "currency": "USD" }
+      }
+    ]
+  }
+]
