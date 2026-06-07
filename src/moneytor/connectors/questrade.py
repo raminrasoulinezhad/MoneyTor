@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Any
 
 import httpx
@@ -31,6 +31,8 @@ from moneytor.domain.models import Account, Holding
 from moneytor.domain.money import Money
 from moneytor.persistence.token_store import TokenStore
 
+from ._parse import to_currency as _currency
+from ._parse import to_decimal as _decimal
 from .errors import AuthError, ConnectorError, FetchError, RateLimitError
 
 _LOGIN_HOST = "https://login.questrade.com"
@@ -61,20 +63,6 @@ class _Session:
 class _SymbolInfo:
     currency: Currency
     asset_class: AssetClass
-
-
-def _decimal(value: Any, where: str) -> Decimal:
-    try:
-        return Decimal(str(value))
-    except (InvalidOperation, TypeError) as exc:
-        raise FetchError(f"Invalid number at {where}: {value!r}.") from exc
-
-
-def _currency(value: Any, where: str) -> Currency:
-    try:
-        return Currency(value)
-    except ValueError as exc:
-        raise FetchError(f"Unsupported currency at {where}: {value!r}.") from exc
 
 
 class QuestradeConnector:
