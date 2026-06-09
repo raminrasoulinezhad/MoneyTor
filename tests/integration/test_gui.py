@@ -184,7 +184,7 @@ def test_error_banner_dismiss(qtbot) -> None:
 def test_gui_otp_provider_returns_code_from_dialog(qtbot, monkeypatch) -> None:
     from moneytor.ui import otp as otp_module
 
-    monkeypatch.setattr(otp_module, "prompt_otp", lambda parent=None: "654321")
+    monkeypatch.setattr(otp_module, "prompt_otp", lambda parent=None, account="": "654321")
     provider = otp_module.GuiOtpProvider()
 
     # Invoked from a worker thread; the dialog slot runs on the GUI thread and
@@ -196,10 +196,31 @@ def test_gui_otp_provider_returns_code_from_dialog(qtbot, monkeypatch) -> None:
     worker.wait()
 
 
+def test_gui_otp_provider_includes_account_in_prompt(qtbot, monkeypatch) -> None:
+    from moneytor.ui import otp as otp_module
+
+    captured: dict[str, str] = {}
+
+    def fake_prompt(parent=None, account="") -> str:
+        captured["account"] = account
+        return "111222"
+
+    monkeypatch.setattr(otp_module, "prompt_otp", fake_prompt)
+    provider = otp_module.GuiOtpProvider()
+    labelled = provider.for_account("ramin", "you@example.com")
+
+    worker = FetchWorker(task=labelled)
+    with qtbot.waitSignal(worker.succeeded, timeout=2000) as blocker:
+        worker.start()
+    assert blocker.args == ["111222"]
+    assert captured["account"] == "ramin (you@example.com)"
+    worker.wait()
+
+
 def test_gui_otp_provider_returns_empty_on_cancel(qtbot, monkeypatch) -> None:
     from moneytor.ui import otp as otp_module
 
-    monkeypatch.setattr(otp_module, "prompt_otp", lambda parent=None: "")
+    monkeypatch.setattr(otp_module, "prompt_otp", lambda parent=None, account="": "")
     provider = otp_module.GuiOtpProvider()
 
     worker = FetchWorker(task=provider)

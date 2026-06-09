@@ -85,12 +85,17 @@ def _connectors_for(
             )
         )
     if creds.wealthsimple_email is not None and creds.wealthsimple_password is not None:
+        # Give the 2FA prompt this person's name + email so the user knows
+        # which account the code is for.
+        account_otp: OtpProvider | None = otp_provider
+        if isinstance(otp_provider, GuiOtpProvider):
+            account_otp = otp_provider.for_account(creds.person_id, creds.wealthsimple_email)
         connectors.append(
             WealthsimpleConnector(
                 person_id=creds.person_id,
                 email=creds.wealthsimple_email,
                 password=creds.wealthsimple_password,
-                otp_provider=otp_provider,
+                otp_provider=account_otp,
                 token_store=token_store,
             )
         )

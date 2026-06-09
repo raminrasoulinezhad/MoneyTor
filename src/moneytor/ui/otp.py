@@ -10,6 +10,7 @@ signal and blocks until the user submits or cancels.
 from __future__ import annotations
 
 import queue
+from collections.abc import Callable
 
 from PySide6.QtCore import QObject, Qt, Signal, Slot
 from PySide6.QtWidgets import QWidget
@@ -29,6 +30,7 @@ class GuiOtpProvider(QObject):
     def __init__(self, parent_widget: QWidget | None = None) -> None:
         super().__init__()
         self.parent_widget = parent_widget
+        self._account = ""
         self._result: queue.Queue[str] = queue.Queue(maxsize=1)
         # Queued: emitted from the worker thread, the slot runs on the GUI thread.
         self._requested.connect(self._show, Qt.ConnectionType.QueuedConnection)
@@ -38,6 +40,19 @@ class GuiOtpProvider(QObject):
         self._requested.emit()
         return self._result.get()
 
+    def for_account(self, person_id: str, email: str) -> Callable[[], str]:
+        """Return a zero-arg ``otp_provider`` whose prompt names this account.
+
+        Logins run sequentially on the worker thread, so stashing the label on
+        the instance before each prompt is safe.
+        """
+
+        def provider() -> str:
+            self._account = f"{person_id} ({email})" if email else person_id
+            return self()
+
+        return provider
+
     @Slot()
     def _show(self) -> None:
-        self._result.put(prompt_otp(self.parent_widget))
+        self._result.put(prompt_otp(self.parent_widget, account=self._account))
