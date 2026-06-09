@@ -167,7 +167,13 @@ def build_dashboard_view_model(
     account_count = sum(len(p.accounts) for p in snapshot.people)
     top = rows[0] if rows else None
     kpis = (
-        KpiModel("Total Portfolio Value", total.format(), f"in {currency.value}"),
+        # Currency shown once, in the subtitle — keeps the big number short so
+        # it doesn't truncate in the card.
+        KpiModel(
+            "Total Portfolio Value",
+            total.format(with_currency=False),
+            f"in {currency.value}",
+        ),
         KpiModel("Holdings", str(len(rows)), f"across {account_count} accounts"),
         KpiModel(
             "Top Position",

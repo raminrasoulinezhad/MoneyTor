@@ -40,7 +40,7 @@ def _window(qtbot) -> MainWindow:
 def test_window_renders_kpis_and_table(qtbot) -> None:
     window = _window(qtbot)
     assert len(window.kpi_panel.kpi_cards) == 3
-    assert "CAD" in window.kpi_panel.kpi_cards[0].value_text
+    assert "$" in window.kpi_panel.kpi_cards[0].value_text  # currency code is in the subtitle
     assert window.dashboard.table.rowCount() == 3  # SHOP, VFV, AAPL
 
 

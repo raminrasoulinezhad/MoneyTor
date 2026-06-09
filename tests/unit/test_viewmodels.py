@@ -26,7 +26,9 @@ def test_view_model_has_three_kpis_and_total() -> None:
     vm = build_dashboard_view_model(snapshot, PROVIDER)
     assert len(vm.kpis) == 3
     assert vm.kpis[0].title == "Total Portfolio Value"
-    assert "CAD" in vm.kpis[0].value
+    assert vm.kpis[0].value.startswith("$")  # number only
+    assert "CAD" not in vm.kpis[0].value  # currency code lives in the subtitle
+    assert vm.kpis[0].subtitle == "in CAD"
     assert vm.holding_count == 3
     assert vm.account_count == 2
 

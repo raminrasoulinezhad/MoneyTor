@@ -119,11 +119,16 @@ class Money:
         exp = Decimal(1).scaleb(-places)
         return Money(self.amount.quantize(exp, rounding=ROUND_HALF_EVEN), self.currency)
 
-    def format(self, places: int = 2) -> str:
-        """Human-readable form, e.g. ``$1,234.56 CAD`` / ``-$50.00 USD``."""
+    def format(self, places: int = 2, *, with_currency: bool = True) -> str:
+        """Human-readable form, e.g. ``$1,234.56 CAD`` / ``-$50.00 USD``.
+
+        Set ``with_currency=False`` to omit the trailing currency code (e.g.
+        when the currency is already shown elsewhere, like a KPI subtitle).
+        """
         rounded = self.quantize(places).amount
         sign = "-" if rounded < 0 else ""
-        return f"{sign}${abs(rounded):,.{places}f} {self.currency.value}"
+        suffix = f" {self.currency.value}" if with_currency else ""
+        return f"{sign}${abs(rounded):,.{places}f}{suffix}"
 
     def __str__(self) -> str:
         return self.format()

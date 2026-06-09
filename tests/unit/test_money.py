@@ -128,3 +128,8 @@ def test_format_negative() -> None:
 def test_str_matches_format() -> None:
     money = Money.of("12.3", CAD)
     assert str(money) == money.format()
+
+
+def test_format_without_currency_code() -> None:
+    assert Money.of("1234.5", CAD).format(with_currency=False) == "$1,234.50"
+    assert Money.of("-50", USD).format(with_currency=False) == "-$50.00"
