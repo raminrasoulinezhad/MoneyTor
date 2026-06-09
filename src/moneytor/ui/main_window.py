@@ -52,10 +52,11 @@ class MainWindow(QMainWindow):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("MoneyTor")
-        # Tall enough that the chart panel plus the top ~6 holdings are visible
-        # on first launch without resizing.
-        self.resize(1200, 1000)
-        self.setMinimumSize(960, 720)
+        # Wide enough for the full 8-column holdings table (plus the 300px left
+        # column) with no horizontal scroll, and tall enough for the chart plus
+        # the top ~6 holdings on first launch.
+        self.resize(1600, 1000)
+        self.setMinimumSize(1280, 720)
 
         self._people = people
         self._provider = provider
