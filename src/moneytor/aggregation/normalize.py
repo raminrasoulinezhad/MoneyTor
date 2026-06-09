@@ -19,7 +19,9 @@ from pathlib import Path
 from moneytor.domain.models import Account, Person
 
 # Suffixes that denote a listing venue (safe to strip), not a share class.
-KNOWN_EXCHANGE_SUFFIXES = frozenset({"TO", "V", "NE", "CN", "TSX", "TSXV", "US"})
+# ``VN`` is TSX Venture as some feeds spell it (alongside ``V``); like the
+# others it only names the exchange, so ``ABC.VN`` collapses to ``ABC``.
+KNOWN_EXCHANGE_SUFFIXES = frozenset({"TO", "V", "VN", "NE", "CN", "TSX", "TSXV", "US"})
 
 # The 11 official GICS sectors (for reference / file-override validation).
 GICS_SECTORS: tuple[str, ...] = (
@@ -146,8 +148,7 @@ def apply_sector_map(people: Sequence[Person], sector_map: SectorMap) -> tuple[P
 
     def fill(account: Account) -> Account:
         holdings = tuple(
-            h if h.sector else replace(h, sector=sector_map.get(h.symbol))
-            for h in account.holdings
+            h if h.sector else replace(h, sector=sector_map.get(h.symbol)) for h in account.holdings
         )
         return replace(account, holdings=holdings)
 

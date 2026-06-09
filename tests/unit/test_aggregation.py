@@ -61,6 +61,7 @@ def _holding(symbol: str, exchange: str, currency: Currency, qty: str, mv: str) 
     [
         ("SHOP.TO", "SHOP"),
         ("shop.to", "SHOP"),
+        ("ABC.VN", "ABC"),  # TSX Venture venue suffix stripped
         ("BRK.B", "BRK.B"),  # share-class dot preserved
         ("AAPL", "AAPL"),
         (" vfv.to ", "VFV"),
@@ -102,6 +103,21 @@ def test_merge_is_order_independent() -> None:
     reverse = merge_holdings([b, a], CAD, PROVIDER)
     assert forward[0].total_market_value == reverse[0].total_market_value
     assert forward[0].total_quantity == reverse[0].total_quantity
+
+
+def test_merge_collapses_venue_suffix_and_fills_missing_metadata() -> None:
+    # Same asset from two sources: one carries the name, the other the sector.
+    venue = replace(
+        _holding("ABC.VN", "TSXV", CAD, "10", "100.00"), name="Alpha Beta Corp", sector=""
+    )
+    plain = replace(_holding("ABC", "TSX", CAD, "5", "50.00"), name="", sector="Energy")
+    unified = merge_holdings([venue, plain], CAD, PROVIDER)
+    assert len(unified) == 1
+    abc = unified[0]
+    assert abc.symbol == "ABC"  # .VN suffix stripped, merged with plain "ABC"
+    assert abc.total_quantity == Decimal("15")
+    assert abc.name == "Alpha Beta Corp"  # filled from the source that has it
+    assert abc.sector == "Energy"  # filled from the other source
 
 
 def test_merge_results_sorted_by_symbol() -> None:
