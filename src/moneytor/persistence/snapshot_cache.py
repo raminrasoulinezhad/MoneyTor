@@ -18,6 +18,9 @@ from moneytor.domain.models import Account, Holding, Person
 from moneytor.domain.money import Money
 
 DEFAULT_CACHE_PATH = Path(".cache") / "snapshot.json"
+# Bump when the serialized holding/account shape changes so stale caches
+# (e.g. missing name/sector) are ignored rather than shown with blank fields.
+_SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -36,6 +39,8 @@ def _money_dict(money: Money) -> dict[str, str]:
 def _holding_dict(holding: Holding) -> dict[str, Any]:
     return {
         "symbol": holding.symbol,
+        "name": holding.name,
+        "sector": holding.sector,
         "exchange": holding.exchange,
         "asset_class": holding.asset_class.value,
         "quantity": str(holding.quantity),
@@ -70,6 +75,8 @@ def _money(node: Any) -> Money:
 def _holding(node: Any) -> Holding:
     return Holding(
         symbol=str(node["symbol"]),
+        name=str(node.get("name", "")),
+        sector=str(node.get("sector", "")),
         exchange=str(node["exchange"]),
         asset_class=AssetClass(node["asset_class"]),
         quantity=Decimal(str(node["quantity"])),
@@ -111,6 +118,7 @@ class SnapshotCache:
     ) -> None:
         """Serialize ``people`` and metadata to the cache file."""
         data = {
+            "version": _SCHEMA_VERSION,
             "display_currency": display_currency.value,
             "as_of": as_of,
             "people": [_person_dict(p) for p in people],
@@ -124,6 +132,8 @@ class SnapshotCache:
             return None
         try:
             data = json.loads(self._path.read_text(encoding="utf-8"))
+            if data.get("version") != _SCHEMA_VERSION:
+                return None  # stale schema (e.g. pre-name/sector) — refetch
             return CachedPortfolio(
                 people=tuple(_person(p) for p in data["people"]),
                 display_currency=Currency(data["display_currency"]),

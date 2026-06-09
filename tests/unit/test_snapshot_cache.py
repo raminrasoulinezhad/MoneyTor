@@ -35,7 +35,21 @@ def test_roundtrip_preserves_data(tmp_path: Path) -> None:
     tfsa = person.accounts[0]
     assert tfsa.cash == Money.of("1500.00", Currency.CAD)
     assert tfsa.holdings[0].symbol == "SHOP"
+    assert tfsa.holdings[0].name == "Shopify Inc."  # name survives the round-trip
     assert tfsa.holdings[0].market_value == Money.of("1200.50", Currency.CAD)
+
+
+def test_stale_schema_version_is_ignored(tmp_path: Path) -> None:
+    import json
+
+    path = tmp_path / "snap.json"
+    cache = SnapshotCache(path)
+    cache.save(_people(), Currency.CAD)
+    # Simulate an older cache by dropping the version marker.
+    data = json.loads(path.read_text(encoding="utf-8"))
+    del data["version"]
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert cache.load() is None
 
 
 def test_corrupt_cache_returns_none(tmp_path: Path) -> None:
