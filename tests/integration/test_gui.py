@@ -141,3 +141,36 @@ def test_error_banner_dismiss(qtbot) -> None:
     assert not window.banner.isHidden()
     window.banner.hide()
     assert window.banner.isHidden()
+
+
+# --------------------------------------------------------------------------- #
+# GUI OTP bridge (Wealthsimple 2FA)
+# --------------------------------------------------------------------------- #
+
+
+def test_gui_otp_provider_returns_code_from_dialog(qtbot, monkeypatch) -> None:
+    from moneytor.ui import otp as otp_module
+
+    monkeypatch.setattr(otp_module, "prompt_otp", lambda parent=None: "654321")
+    provider = otp_module.GuiOtpProvider()
+
+    # Invoked from a worker thread; the dialog slot runs on the GUI thread and
+    # the code is marshalled back to the caller.
+    worker = FetchWorker(task=provider)
+    with qtbot.waitSignal(worker.succeeded, timeout=2000) as blocker:
+        worker.start()
+    assert blocker.args == ["654321"]
+    worker.wait()
+
+
+def test_gui_otp_provider_returns_empty_on_cancel(qtbot, monkeypatch) -> None:
+    from moneytor.ui import otp as otp_module
+
+    monkeypatch.setattr(otp_module, "prompt_otp", lambda parent=None: "")
+    provider = otp_module.GuiOtpProvider()
+
+    worker = FetchWorker(task=provider)
+    with qtbot.waitSignal(worker.succeeded, timeout=2000) as blocker:
+        worker.start()
+    assert blocker.args == [""]
+    worker.wait()

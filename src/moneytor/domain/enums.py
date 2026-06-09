@@ -29,6 +29,7 @@ class AccountType(StrEnum):
     TFSA = "tfsa"
     RRSP = "rrsp"
     SPOUSAL_RRSP = "spousal_rrsp"
+    FHSA = "fhsa"
     MARGIN = "margin"
     MANAGED = "managed"
     GIC = "gic"

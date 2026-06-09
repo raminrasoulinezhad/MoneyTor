@@ -1,68 +1,139 @@
 """Wealthsimple connector — UNOFFICIAL API.
 
 Wealthsimple publishes no official/documented API. This connector targets the
-well-known community OAuth flow:
+community-reverse-engineered flow:
 
-1. Password grant (email + password). If 2FA is enabled, the first request is
-   rejected with an OTP challenge (an ``x-wealthsimple-otp`` response header);
-   the request is then retried with the user-supplied code in the
-   ``x-wealthsimple-otp`` request header.
-2. The returned refresh token is persisted via :class:`TokenStore` so later
-   runs can refresh silently (no 2FA prompt) until it expires.
-3. Accounts and positions are fetched and mapped into normalized domain models.
+1. Password grant (email + password) against the OAuth v2 login host. If 2FA is
+   enabled, the first request is rejected with an OTP challenge (an
+   ``x-wealthsimple-otp`` response header); the request is retried with the
+   user-supplied code in the ``x-wealthsimple-otp`` request header.
+2. The returned refresh token is persisted via :class:`TokenStore` so later runs
+   refresh silently (no 2FA prompt) until it expires.
+3. The account's ``identity_canonical_id`` is read from the token-info endpoint.
+4. Accounts, positions, and balances are read from the **GraphQL** API
+   (``my.wealthsimple.com/graphql``) and mapped into normalized domain models.
 
 The OTP code is obtained from an injected ``otp_provider`` callable (a GUI
 dialog in the app, ``input()`` in a CLI, or a fixed value in tests).
 
-⚠️ The endpoint paths and payload shapes below are documented *assumptions*
-based on the community-reverse-engineered API. They must be validated against
-the live service with real credentials; they are centralized here so tuning is
-a one-file change. All parsing is defensive and raises ``FetchError`` on
-mismatch rather than crashing.
+⚠️ The endpoints, GraphQL queries, and payload shapes below were validated
+against the live service, but remain unofficial and may change without notice.
+All parsing is defensive and raises ``FetchError`` on mismatch rather than
+crashing. Queries are kept minimal (only the fields we map) and centralized so
+tuning is a one-file change.
 """
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any
 
 import httpx
 
 from moneytor.config.secret import Secret
-from moneytor.domain.enums import AccountType, AssetClass, Institution
+from moneytor.domain.enums import AccountType, AssetClass, Currency, Institution
 from moneytor.domain.models import Account, Holding
+from moneytor.domain.money import Money
 from moneytor.persistence.token_store import TokenStore
 
 from ._parse import to_decimal, to_money
 from .errors import AuthError, ConnectorError, FetchError, RateLimitError
 
 _BASE_URL = "https://api.production.wealthsimple.com/v1/"
+_TOKEN_PATH = "oauth/v2/token"
+_TOKEN_INFO_PATH = "oauth/v2/token/info"
+_GRAPHQL_URL = "https://my.wealthsimple.com/graphql"
+_GRAPHQL_VERSION = "12"
 _INSTITUTION_KEY = Institution.WEALTHSIMPLE.value
 _OTP_HEADER = "x-wealthsimple-otp"
-_CLIENT_SCOPE = "invest.read trade.read"
+_WS_CLIENT_HEADER = "@wealthsimple/wealthsimple"
+_CLIENT_SCOPE = "invest.read trade.read tax.read"
+# Public client id used by the community-reverse-engineered Wealthsimple API.
+_CLIENT_ID = "4da53ac2b03225bed1550eba8e4611e086c7b905a3855e6ed12ea08c246758fa"
 
 OtpProvider = Callable[[], str]
 
+# Wealthsimple's GraphQL ``type`` field -> our normalized account type.
 _ACCOUNT_TYPES: dict[str, AccountType] = {
-    "ca_tfsa": AccountType.TFSA,
-    "ca_rrsp": AccountType.RRSP,
-    "ca_spousal_rrsp": AccountType.SPOUSAL_RRSP,
-    "ca_non_registered": AccountType.CASH,
-    "ca_non_registered_margin": AccountType.MARGIN,
+    "tfsa": AccountType.TFSA,
+    "rrsp": AccountType.RRSP,
+    "spousal_rrsp": AccountType.SPOUSAL_RRSP,
+    "group_rrsp": AccountType.RRSP,
+    "fhsa": AccountType.FHSA,
+    "ca_cash": AccountType.CASH,
+    "ca_cash_msb": AccountType.CASH,
+    "non_registered": AccountType.CASH,
+    "non_registered_crypto": AccountType.CASH,
     "managed": AccountType.MANAGED,
 }
 _SECURITY_TYPES: dict[str, AssetClass] = {
-    "equity": AssetClass.EQUITY,
-    "etf": AssetClass.ETF,
-    "bond": AssetClass.FIXED_INCOME,
-    "crypto": AssetClass.CRYPTO,
+    "EQUITY": AssetClass.EQUITY,
+    "ETF": AssetClass.ETF,
+    "BOND": AssetClass.FIXED_INCOME,
+    "CRYPTO": AssetClass.CRYPTO,
+    "MUTUAL_FUND": AssetClass.OTHER,
+    "OPTION": AssetClass.OTHER,
 }
+# Wealthsimple models cash as synthetic "securities" in the balances payload.
+_CASH_SECURITIES: dict[str, Currency] = {
+    "sec-c-cad": Currency.CAD,
+    "sec-c-usd": Currency.USD,
+}
+
+_ACCOUNTS_QUERY = """
+query Accounts($identityId: ID!, $cursor: String) {
+  identity(id: $identityId) {
+    accounts(filter: {}, first: 25, after: $cursor) {
+      pageInfo { hasNextPage endCursor }
+      edges { node { id type currency status } }
+    }
+  }
+}
+"""
+_POSITIONS_QUERY = """
+query Positions($identityId: ID!, $currency: Currency!, $cursor: String) {
+  identity(id: $identityId) {
+    financials {
+      current(currency: $currency) {
+        positions(first: 100, after: $cursor) {
+          pageInfo { hasNextPage endCursor }
+          edges { node {
+            quantity
+            accounts { id }
+            bookValue { amount currency }
+            totalValue { amount currency }
+            security { securityType stock { symbol primaryExchange } }
+          } }
+        }
+      }
+    }
+  }
+}
+"""
+_BALANCES_QUERY = """
+query Balances($ids: [String!]!, $type: BalanceType!) {
+  accounts(ids: $ids) {
+    id
+    custodianAccounts {
+      financials {
+        ... on CustodianAccountFinancialsSo {
+          balance(type: $type) { quantity securityId }
+        }
+      }
+    }
+  }
+}
+"""
 
 
 @dataclass(frozen=True)
 class _Session:
     access_token: str
+    identity_id: str
+    session_id: str
 
 
 class WealthsimpleConnector:
@@ -101,7 +172,13 @@ class WealthsimpleConnector:
         self._password_login()
 
     def _try_refresh(self, refresh_token: str) -> bool:
-        response = self._post_token({"grant_type": "refresh_token", "refresh_token": refresh_token})
+        response = self._post_token(
+            {
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "client_id": _CLIENT_ID,
+            }
+        )
         if response.status_code == httpx.codes.OK:
             self._store_session(response.json())
             return True
@@ -114,6 +191,8 @@ class WealthsimpleConnector:
             "password": self._password.reveal(),
             "scope": _CLIENT_SCOPE,
             "skip_provision": "true",
+            "client_id": _CLIENT_ID,
+            "otp_claim": "null",
         }
         response = self._post_token(body)
 
@@ -142,12 +221,35 @@ class WealthsimpleConnector:
         refresh = data.get("refresh_token")
         if isinstance(refresh, str) and refresh:
             self._token_store.save(_INSTITUTION_KEY, self._person_id, refresh)
-        self._session = _Session(access_token=str(data["access_token"]))
+        access = str(data["access_token"])
+        self._session = _Session(
+            access_token=access,
+            identity_id=self._fetch_identity(access),
+            session_id=str(uuid.uuid4()),
+        )
+
+    def _fetch_identity(self, access_token: str) -> str:
+        try:
+            response = self._client.get(
+                f"{self._base_url}{_TOKEN_INFO_PATH}",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "x-wealthsimple-client": _WS_CLIENT_HEADER,
+                },
+            )
+        except httpx.HTTPError as exc:
+            raise FetchError(f"Wealthsimple token-info request failed: {exc}.") from exc
+        self._raise_for_status(response)
+        data = response.json()
+        identity = data.get("identity_canonical_id") if isinstance(data, dict) else None
+        if not identity:
+            raise AuthError("Wealthsimple token-info missing identity_canonical_id.")
+        return str(identity)
 
     def _post_token(self, body: dict[str, str], otp: str | None = None) -> httpx.Response:
         headers = {_OTP_HEADER: otp} if otp else None
         try:
-            return self._client.post(f"{self._base_url}oauth/token", json=body, headers=headers)
+            return self._client.post(f"{self._base_url}{_TOKEN_PATH}", json=body, headers=headers)
         except httpx.HTTPError as exc:
             raise FetchError(f"Wealthsimple auth request failed: {exc}.") from exc
 
@@ -156,53 +258,148 @@ class WealthsimpleConnector:
     def fetch_accounts(self) -> tuple[Account, ...]:
         if self._session is None:
             raise ConnectorError("Call authenticate() before fetch_accounts().")
-        accounts_node = self._get("account/list").get("results", [])
-        return tuple(self._map_account(node) for node in accounts_node)
+        identity = self._session.identity_id
 
-    def _map_account(self, node: Any) -> Account:
-        if not isinstance(node, dict):
-            raise FetchError(f"Malformed account node: {node!r}.")
+        open_accounts = [n for n in self._account_nodes(identity) if n.get("status") == "open"]
+        if not open_accounts:
+            return ()
+        open_ids = [str(n["id"]) for n in open_accounts]
+
+        positions = self._positions_by_account(identity)
+        balances = self._balances_by_account(open_ids)
+        return tuple(self._build_account(n, positions, balances) for n in open_accounts)
+
+    def _account_nodes(self, identity: str) -> list[dict[str, Any]]:
+        nodes: list[dict[str, Any]] = []
+        cursor: str | None = None
+        while True:
+            data = self._graphql(
+                "Accounts", _ACCOUNTS_QUERY, {"identityId": identity, "cursor": cursor}
+            )
+            connection = _nested(data, "identity", "accounts")
+            nodes.extend(_edge_nodes(connection))
+            cursor = _next_cursor(connection)
+            if cursor is None:
+                return nodes
+
+    def _positions_by_account(self, identity: str) -> dict[str, list[Holding]]:
+        grouped: dict[str, list[Holding]] = {}
+        cursor: str | None = None
+        while True:
+            data = self._graphql(
+                "Positions",
+                _POSITIONS_QUERY,
+                {"identityId": identity, "currency": Currency.CAD.value, "cursor": cursor},
+            )
+            connection = _nested(data, "identity", "financials", "current", "positions")
+            for node in _edge_nodes(connection):
+                holding = self._map_position(node)
+                for owner in node.get("accounts") or []:
+                    if isinstance(owner, dict) and owner.get("id"):
+                        grouped.setdefault(str(owner["id"]), []).append(holding)
+            cursor = _next_cursor(connection)
+            if cursor is None:
+                return grouped
+
+    def _balances_by_account(self, account_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
+        data = self._graphql("Balances", _BALANCES_QUERY, {"ids": account_ids, "type": "TRADING"})
+        result: dict[str, list[dict[str, Any]]] = {}
+        for account in data.get("accounts") or []:
+            if not isinstance(account, dict):
+                continue
+            entries: list[dict[str, Any]] = []
+            for custodian in account.get("custodianAccounts") or []:
+                financials = custodian.get("financials") if isinstance(custodian, dict) else None
+                balance = financials.get("balance") if isinstance(financials, dict) else None
+                if isinstance(balance, list):
+                    entries.extend(b for b in balance if isinstance(b, dict))
+            result[str(account.get("id"))] = entries
+        return result
+
+    def _build_account(
+        self,
+        node: dict[str, Any],
+        positions: dict[str, list[Holding]],
+        balances: dict[str, list[dict[str, Any]]],
+    ) -> Account:
         account_id = str(node["id"])
-        positions = self._get("account/positions", params={"account_id": account_id}).get(
-            "results", []
-        )
+        cash, extra_cash = self._map_cash(balances.get(account_id, []))
+        holdings = tuple(positions.get(account_id, ())) + extra_cash
         return Account(
             id=account_id,
             person_id=self._person_id,
             institution=Institution.WEALTHSIMPLE,
             account_type=_ACCOUNT_TYPES.get(str(node.get("type")), AccountType.CASH),
-            cash=to_money(node.get("cash", {}), "account.cash"),
-            holdings=tuple(self._map_position(p) for p in positions),
+            cash=cash,
+            holdings=holdings,
         )
 
-    def _map_position(self, node: Any) -> Holding:
-        if not isinstance(node, dict):
-            raise FetchError(f"Malformed position node: {node!r}.")
+    def _map_position(self, node: dict[str, Any]) -> Holding:
+        security = node.get("security") if isinstance(node.get("security"), dict) else {}
+        stock = security.get("stock") if isinstance(security.get("stock"), dict) else {}
+        symbol = stock.get("symbol") or security.get("id") or "UNKNOWN"
         return Holding(
-            symbol=str(node["symbol"]),
-            exchange=str(node.get("exchange", "")),
-            asset_class=_SECURITY_TYPES.get(str(node.get("security_type")), AssetClass.OTHER),
+            symbol=str(symbol),
+            exchange=str(stock.get("primaryExchange") or ""),
+            asset_class=_SECURITY_TYPES.get(str(security.get("securityType")), AssetClass.OTHER),
             quantity=to_decimal(node.get("quantity", 0), "position.quantity"),
-            book_value=to_money(node.get("book_value", {}), "position.book_value"),
-            market_value=to_money(node.get("market_value", {}), "position.market_value"),
+            book_value=_money_or_zero(node.get("bookValue"), "position.bookValue"),
+            market_value=_money_or_zero(node.get("totalValue"), "position.totalValue"),
         )
+
+    def _map_cash(self, entries: list[dict[str, Any]]) -> tuple[Money, tuple[Holding, ...]]:
+        """Cash in its primary (CAD-preferred) currency; other currencies become
+        synthetic CASH holdings so nothing is lost (mirrors the Questrade map)."""
+        by_currency: dict[Currency, Decimal] = {}
+        for entry in entries:
+            currency = _CASH_SECURITIES.get(str(entry.get("securityId")))
+            if currency is None:
+                continue
+            by_currency[currency] = to_decimal(entry.get("quantity", 0), "balance.quantity")
+
+        if not by_currency:
+            return Money.zero(Currency.CAD), ()
+        primary = Currency.CAD if Currency.CAD in by_currency else next(iter(by_currency))
+        cash = Money(by_currency[primary], primary)
+        extra = tuple(
+            Holding(
+                symbol=f"CASH:{currency.value}",
+                exchange="",
+                asset_class=AssetClass.CASH,
+                quantity=amount,
+                book_value=Money(amount, currency),
+                market_value=Money(amount, currency),
+            )
+            for currency, amount in by_currency.items()
+            if currency is not primary and amount != 0
+        )
+        return cash, extra
 
     # -- http helpers ------------------------------------------------------- #
 
-    def _get(self, path: str, params: dict[str, str] | None = None) -> dict[str, Any]:
+    def _graphql(self, operation: str, query: str, variables: dict[str, Any]) -> dict[str, Any]:
         assert self._session is not None  # guarded by callers
         try:
-            response = self._client.get(
-                f"{self._base_url}{path}",
-                headers={"Authorization": f"Bearer {self._session.access_token}"},
-                params=params,
+            response = self._client.post(
+                _GRAPHQL_URL,
+                headers={
+                    "Authorization": f"Bearer {self._session.access_token}",
+                    "x-ws-profile": "trade",
+                    "x-ws-api-version": _GRAPHQL_VERSION,
+                    "x-ws-locale": "en-CA",
+                    "x-platform-os": "web",
+                    "x-ws-session-id": self._session.session_id,
+                },
+                json={"operationName": operation, "query": query, "variables": variables},
             )
         except httpx.HTTPError as exc:
-            raise FetchError(f"Wealthsimple request to {path} failed: {exc}.") from exc
+            raise FetchError(f"Wealthsimple GraphQL {operation} failed: {exc}.") from exc
         self._raise_for_status(response)
-        data = response.json()
+        payload = response.json()
+        data = payload.get("data") if isinstance(payload, dict) else None
         if not isinstance(data, dict):
-            raise FetchError(f"Wealthsimple {path} returned a non-object response.")
+            errors = payload.get("errors") if isinstance(payload, dict) else payload
+            raise FetchError(f"Wealthsimple GraphQL {operation} returned errors: {errors!r}.")
         return data
 
     @staticmethod
@@ -214,3 +411,34 @@ class WealthsimpleConnector:
             raise RateLimitError("Wealthsimple rate limit hit (429); retry later.")
         if code >= httpx.codes.BAD_REQUEST:
             raise FetchError(f"Wealthsimple returned HTTP {code}.")
+
+
+# --------------------------------------------------------------------------- #
+# GraphQL traversal helpers (defensive: never raise on a missing node)
+# --------------------------------------------------------------------------- #
+
+
+def _nested(data: dict[str, Any], *keys: str) -> dict[str, Any]:
+    node: Any = data
+    for key in keys:
+        node = node.get(key) if isinstance(node, dict) else None
+    return node if isinstance(node, dict) else {}
+
+
+def _edge_nodes(connection: dict[str, Any]) -> list[dict[str, Any]]:
+    edges = connection.get("edges") if isinstance(connection, dict) else None
+    if not isinstance(edges, list):
+        return []
+    return [e["node"] for e in edges if isinstance(e, dict) and isinstance(e.get("node"), dict)]
+
+
+def _next_cursor(connection: dict[str, Any]) -> str | None:
+    page = connection.get("pageInfo") if isinstance(connection, dict) else None
+    if isinstance(page, dict) and page.get("hasNextPage"):
+        cursor = page.get("endCursor")
+        return str(cursor) if cursor else None
+    return None
+
+
+def _money_or_zero(node: Any, where: str) -> Money:
+    return to_money(node, where) if isinstance(node, dict) else Money.zero(Currency.CAD)
