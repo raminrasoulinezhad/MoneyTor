@@ -102,6 +102,20 @@ def test_chart_panel_shows_summary_fallback_when_headless(qtbot) -> None:
     assert "Allocation" in body.text()
 
 
+def test_table_sorts_market_value_numerically(qtbot) -> None:
+    from PySide6.QtCore import Qt
+
+    window = _window(qtbot)
+    table = window.dashboard.table
+    # Market Value column (5): sort ascending and confirm true numeric order
+    # (string sort would put "$1,200.50" before "$950.75").
+    table.sortItems(5, Qt.SortOrder.AscendingOrder)
+    values = [table.item(r, 5).text() for r in range(table.rowCount())]
+    # AAPL 950.75 (USD) -> CAD is smallest; the largest is VFV 3100.
+    amounts = [float(v.replace("$", "").replace(",", "").split()[0]) for v in values]
+    assert amounts == sorted(amounts)
+
+
 def test_chart_selector_switches_to_sectors(qtbot) -> None:
     window = _window(qtbot)
     panel = window.dashboard.chart_panel
