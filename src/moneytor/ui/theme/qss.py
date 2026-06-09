@@ -57,6 +57,29 @@ def build_qss(t: ThemeTokens) -> str:
     #CardSubtitle {{ font-size: {t.font_size_label}px; color: {t.text_muted}; }}
     #Placeholder {{ color: {t.text_muted}; }}
 
+    /* Inputs (search box, chart selector, dialog fields) */
+    QLineEdit, QComboBox, QAbstractSpinBox {{
+        background: {t.surface_alt};
+        color: {t.text};
+        border: 1px solid {t.border};
+        border-radius: {t.radius_sm}px;
+        padding: 6px 10px;
+        selection-background-color: {t.accent};
+        selection-color: white;
+    }}
+    QLineEdit:focus, QComboBox:focus {{ border: 1px solid {t.accent}; }}
+    QLineEdit {{ color: {t.text}; }}
+    QComboBox QAbstractItemView {{
+        background: {t.surface};
+        color: {t.text};
+        selection-background-color: {t.accent};
+        selection-color: white;
+    }}
+
+    /* Dialogs (e.g. the 2FA prompt) inherit the app palette */
+    QDialog, QMessageBox, QInputDialog {{ background: {t.surface}; }}
+    QDialog QLabel, QMessageBox QLabel, QInputDialog QLabel {{ color: {t.text}; }}
+
     /* Buttons */
     QPushButton {{
         background: {t.accent};
