@@ -4,22 +4,27 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime
+from pathlib import Path
 
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QToolBar,
     QVBoxLayout,
     QWidget,
 )
 
+from moneytor.aggregation import build_snapshot
 from moneytor.connectors.errors import ConnectorError
 from moneytor.domain.enums import Currency
 from moneytor.domain.models import Person
 from moneytor.fx.provider import FxProvider
+from moneytor.reporting import build_report, render_markdown, write_pdf
 from moneytor.ui.theme import Theme, stylesheet_for, tokens_for
 from moneytor.ui.viewmodels import SidebarModel, view_model_for
 from moneytor.ui.views.dashboard import DashboardView
@@ -111,6 +116,20 @@ class MainWindow(QMainWindow):
         self._worker.failed.connect(self._on_reload_failed)
         self._worker.start()
 
+    def export_report(self, pdf_path: str | Path) -> tuple[Path, Path]:
+        """Write a PDF + Markdown portfolio report for the full portfolio.
+
+        Returns the ``(markdown_path, pdf_path)`` written. The Markdown file is
+        placed alongside the PDF with a ``.md`` suffix.
+        """
+        snapshot = build_snapshot(self._people, self._currency, self._provider, as_of=self._clock())
+        report = build_report(snapshot, self._provider)
+        pdf = Path(pdf_path)
+        markdown = pdf.with_suffix(".md")
+        write_pdf(report, pdf)
+        markdown.write_text(render_markdown(report), encoding="utf-8")
+        return markdown, pdf
+
     def apply_theme(self, theme: Theme) -> None:
         """Apply ``theme`` stylesheet and chart palette across the app."""
         self._theme = theme
@@ -139,6 +158,10 @@ class MainWindow(QMainWindow):
         refresh_button.clicked.connect(self.reload_data)
         toolbar.addWidget(refresh_button)
 
+        export_button = QPushButton("Export Report")
+        export_button.clicked.connect(self._on_export)
+        toolbar.addWidget(export_button)
+
         self._theme_button = QPushButton("Toggle theme")
         self._theme_button.clicked.connect(self.toggle_theme)
         toolbar.addWidget(self._theme_button)
@@ -147,6 +170,19 @@ class MainWindow(QMainWindow):
         self._updated_label.setObjectName("CardSubtitle")
         toolbar.addWidget(self._updated_label)
         self.addToolBar(toolbar)
+
+    def _on_export(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export portfolio report", "moneytor-report.pdf", "PDF Files (*.pdf)"
+        )
+        if not path:
+            return
+        try:
+            markdown, pdf = self.export_report(path)
+        except OSError as exc:
+            self.banner.show_message(f"Could not export report: {exc}")
+            return
+        QMessageBox.information(self, "Report exported", f"Saved:\n{pdf}\n{markdown}")
 
     def _on_selection_changed(self, account_ids: frozenset[str]) -> None:
         # Empty selection means "show everything".

@@ -85,6 +85,15 @@ def test_focus_search_does_not_crash(qtbot) -> None:
     assert window.dashboard.search.hasFocus() or True  # focus is platform-dependent
 
 
+def test_export_report_writes_markdown_and_pdf(qtbot, tmp_path) -> None:
+    window = _window(qtbot)
+    markdown, pdf = window.export_report(tmp_path / "report.pdf")
+    assert pdf.exists() and pdf.read_bytes().startswith(b"%PDF")
+    text = markdown.read_text(encoding="utf-8")
+    assert text.startswith("# MoneyTor Portfolio Report")
+    assert "SHOP" in text  # a holding from the fixture
+
+
 def test_chart_panel_shows_summary_fallback_when_headless(qtbot) -> None:
     # Under the offscreen platform, the panel falls back to a text summary.
     window = _window(qtbot)
