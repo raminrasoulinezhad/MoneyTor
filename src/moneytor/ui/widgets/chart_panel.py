@@ -15,15 +15,25 @@ from typing import Any
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QGuiApplication
-from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QVBoxLayout,
+    QWidget,
+)
 
-from moneytor.ui.charts import allocation_donut_html
+from moneytor.ui.charts import holdings_pie_html, sector_pie_html
 from moneytor.ui.theme.tokens import DARK, ThemeTokens
 from moneytor.ui.viewmodels import HoldingRow
 
+_HOLDINGS = "Holdings"
+_SECTORS = "Sectors"
+
 
 class ChartPanel(QWidget):
-    """Card container for the main dashboard chart."""
+    """Card container for the main dashboard chart (holdings or sector pie)."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -33,8 +43,16 @@ class ChartPanel(QWidget):
         self._layout.setContentsMargins(20, 16, 20, 16)
         self._layout.setSpacing(8)
 
+        header = QHBoxLayout()
         title = QLabel("Portfolio Distribution")
         title.setObjectName("PanelTitle")
+        self.selector = QComboBox()
+        self.selector.setObjectName("ChartSelector")
+        self.selector.addItems([_HOLDINGS, _SECTORS])
+        self.selector.currentTextChanged.connect(self._rerender)
+        header.addWidget(title)
+        header.addStretch(1)
+        header.addWidget(self.selector)
 
         self._body = QLabel("Loading…")
         self._body.setObjectName("Placeholder")
@@ -42,29 +60,44 @@ class ChartPanel(QWidget):
         self._body.setWordWrap(True)
         self._body.setMinimumHeight(220)
 
-        self._layout.addWidget(title)
+        self._layout.addLayout(header)
         self._layout.addWidget(self._body, stretch=1)
 
         # Lazily created QWebEngineView; Any because the import is optional and
         # platform-dependent (justified deviation from the no-Any rule).
         self._webview: Any = None
         self._html_path: str | None = None
+        self._rows: tuple[HoldingRow, ...] = ()
+        self._tokens: ThemeTokens = DARK
 
     def set_allocation(self, rows: Sequence[HoldingRow], tokens: ThemeTokens = DARK) -> None:
-        """Render the allocation donut for ``rows`` (or a fallback message)."""
-        if not rows:
-            self._show_text("No holdings for this selection.")
-            return
-        if self._ensure_webview():
-            self._render_html(allocation_donut_html(rows, tokens))
-        else:
-            self._show_text(_summary(rows))
+        """Store rows and render the currently-selected chart (holdings/sectors)."""
+        self._rows = tuple(rows)
+        self._tokens = tokens
+        self._rerender()
 
     def set_placeholder_text(self, text: str) -> None:
         """Force the text body (used for loading/empty states)."""
         self._show_text(text)
 
     # -- internals ---------------------------------------------------------- #
+
+    def _rerender(self) -> None:
+        """(Re)draw the chart for the current rows and selected mode."""
+        rows = self._rows
+        if not rows:
+            self._show_text("No holdings for this selection.")
+            return
+        by_sector = self.selector.currentText() == _SECTORS
+        if self._ensure_webview():
+            html = (
+                sector_pie_html(rows, self._tokens)
+                if by_sector
+                else holdings_pie_html(rows, self._tokens)
+            )
+            self._render_html(html)
+        else:
+            self._show_text(_summary(rows, by_sector))
 
     def _render_html(self, html: str) -> None:
         """Load Plotly HTML via a temp file.
@@ -110,8 +143,18 @@ class ChartPanel(QWidget):
         return True
 
 
-def _summary(rows: Sequence[HoldingRow]) -> str:
+def _summary(rows: Sequence[HoldingRow], by_sector: bool = False) -> str:
     """A compact textual allocation summary for headless/fallback rendering."""
+    from decimal import Decimal
+
+    if by_sector:
+        totals: dict[str, Decimal] = {}
+        for row in rows:
+            key = row.sector or "Unknown"
+            totals[key] = totals.get(key, Decimal("0")) + row.value.amount
+        ordered = sorted(totals.items(), key=lambda kv: kv[1], reverse=True)[:4]
+        parts = [name for name, _ in ordered]
+        return "Sectors — " + "  ·  ".join(parts)
     top = rows[: min(4, len(rows))]
     parts = [f"{row.symbol} {row.allocation_pct}" for row in top]
     return "Allocation — " + "  ·  ".join(parts)

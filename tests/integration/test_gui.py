@@ -102,6 +102,14 @@ def test_chart_panel_shows_summary_fallback_when_headless(qtbot) -> None:
     assert "Allocation" in body.text()
 
 
+def test_chart_selector_switches_to_sectors(qtbot) -> None:
+    window = _window(qtbot)
+    panel = window.dashboard.chart_panel
+    assert "Allocation" in panel._body.text()  # holdings mode by default
+    panel.selector.setCurrentText("Sectors")
+    assert "Sectors" in panel._body.text()  # fallback summary switched modes
+
+
 def test_chart_panel_empty_selection_message(qtbot) -> None:
     window = _window(qtbot)
     window._on_selection_changed(frozenset())

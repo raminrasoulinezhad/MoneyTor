@@ -11,6 +11,7 @@ happens on these values (CLAUDE.md's Decimal rule applies to calculations).
 from __future__ import annotations
 
 from collections.abc import Sequence
+from decimal import Decimal
 
 import plotly.graph_objects as go
 
@@ -29,17 +30,18 @@ _PALETTE = [
     "#84cc16",
 ]
 
+# Holdings below this fraction of the portfolio are grouped into "Others".
+_OTHERS_THRESHOLD = Decimal("0.01")
+_UNKNOWN_SECTOR = "Unknown"
 
-def allocation_donut_html(rows: Sequence[HoldingRow], tokens: ThemeTokens) -> str:
-    """Render a donut chart of portfolio allocation by symbol as full HTML."""
-    labels = [row.symbol for row in rows]
-    values = [float(row.value.amount) for row in rows]
 
+def _donut_html(labels: Sequence[str], values: Sequence[Decimal], tokens: ThemeTokens) -> str:
+    """Render a donut chart from parallel label/value sequences as full HTML."""
     figure = go.Figure(
         data=[
             go.Pie(
-                labels=labels,
-                values=values,
+                labels=list(labels),
+                values=[float(v) for v in values],
                 hole=0.58,
                 marker={"colors": _PALETTE, "line": {"color": tokens.surface, "width": 2}},
                 textinfo="label+percent",
@@ -62,3 +64,35 @@ def allocation_donut_html(rows: Sequence[HoldingRow], tokens: ThemeTokens) -> st
         full_html=True,
         config={"displayModeBar": False, "responsive": True},
     )
+
+
+def allocation_donut_html(rows: Sequence[HoldingRow], tokens: ThemeTokens) -> str:
+    """Donut of allocation by symbol (every holding shown individually)."""
+    return _donut_html([r.symbol for r in rows], [r.value.amount for r in rows], tokens)
+
+
+def holdings_pie_html(rows: Sequence[HoldingRow], tokens: ThemeTokens) -> str:
+    """Donut by symbol, grouping holdings under 1% of the portfolio into 'Others'."""
+    labels: list[str] = []
+    values: list[Decimal] = []
+    others = Decimal("0")
+    for row in rows:
+        if row.allocation > _OTHERS_THRESHOLD:
+            labels.append(row.symbol)
+            values.append(row.value.amount)
+        else:
+            others += row.value.amount
+    if others > 0:
+        labels.append("Others")
+        values.append(others)
+    return _donut_html(labels, values, tokens)
+
+
+def sector_pie_html(rows: Sequence[HoldingRow], tokens: ThemeTokens) -> str:
+    """Donut of allocation aggregated by GICS sector ('Unknown' when missing)."""
+    totals: dict[str, Decimal] = {}
+    for row in rows:
+        key = row.sector or _UNKNOWN_SECTOR
+        totals[key] = totals.get(key, Decimal("0")) + row.value.amount
+    ordered = sorted(totals.items(), key=lambda kv: kv[1], reverse=True)
+    return _donut_html([k for k, _ in ordered], [v for _, v in ordered], tokens)
