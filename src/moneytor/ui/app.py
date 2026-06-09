@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QApplication
 
 from moneytor.aggregation import SectorMap, apply_sector_map
 from moneytor.config.errors import ConfigError
+from moneytor.config.logging import setup_logging
 from moneytor.config.settings import PersonCredentials, Settings, load_settings
 from moneytor.connectors import (
     Connector,
@@ -149,6 +150,8 @@ def run_app(argv: list[str] | None = None) -> int:
     """
     app = QApplication.instance() or QApplication(argv or sys.argv)
     settings = _load_settings_safely()
+    # Configure logging with secret redaction before anything can log.
+    setup_logging(settings.log_level, settings.secret_values())
     currency = settings.display_currency
     cache = SnapshotCache()
     token_store = TokenStore()

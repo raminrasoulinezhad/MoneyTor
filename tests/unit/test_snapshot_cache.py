@@ -62,3 +62,9 @@ def test_save_creates_parent_dirs(tmp_path: Path) -> None:
     cache = SnapshotCache(tmp_path / "deep" / "snap.json")
     cache.save(_people(), Currency.CAD)
     assert (tmp_path / "deep" / "snap.json").exists()
+
+
+def test_save_is_owner_only(tmp_path: Path) -> None:
+    path = tmp_path / "snap.json"
+    SnapshotCache(path).save(_people(), Currency.CAD)
+    assert (path.stat().st_mode & 0o777) == 0o600  # financial data, owner-only

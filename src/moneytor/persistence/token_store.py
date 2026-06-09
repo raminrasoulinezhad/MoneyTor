@@ -35,8 +35,13 @@ class TokenStore:
         return self._load().get(institution, {}).get(person_id)
 
     def save(self, institution: str, person_id: str, token: str) -> None:
-        """Persist ``token`` for ``(institution, person_id)``, creating dirs."""
+        """Persist ``token`` for ``(institution, person_id)``, creating dirs.
+
+        Refresh tokens grant full account access, so the file is written
+        owner-only (0600) inside an owner-only directory (0700).
+        """
         data = self._load()
         data.setdefault(institution, {})[person_id] = token
-        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         self._path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        self._path.chmod(0o600)

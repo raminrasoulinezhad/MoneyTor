@@ -38,3 +38,11 @@ def test_corrupt_file_is_ignored(tmp_path: Path) -> None:
     path.write_text("{not json", encoding="utf-8")
     store = TokenStore(path)
     assert store.get("questrade", "ramin") is None
+
+
+def test_saved_token_file_is_owner_only(tmp_path: Path) -> None:
+    path = tmp_path / "tokens.json"
+    store = TokenStore(path)
+    store.save("questrade", "ramin", "secret-refresh-token")
+    # Refresh tokens grant full account access -> must not be group/world readable.
+    assert (path.stat().st_mode & 0o777) == 0o600

@@ -125,8 +125,10 @@ class SnapshotCache:
             "as_of": as_of,
             "people": [_person_dict(p) for p in people],
         }
-        self._path.parent.mkdir(parents=True, exist_ok=True)
+        # Holds full portfolio data; keep it owner-only.
+        self._path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         self._path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        self._path.chmod(0o600)
 
     def load(self) -> CachedPortfolio | None:
         """Return the cached portfolio, or ``None`` if missing/corrupt."""
