@@ -124,4 +124,15 @@ def build_qss(t: ThemeTokens) -> str:
         text-transform: uppercase;
     }}
     QTableWidget::item {{ padding: 6px 8px; }}
+    /* The rank-gutter corner (top-left): match the column headers, label "#". */
+    QTableView QTableCornerButton::section {{
+        background: {t.surface};
+        border: none;
+        border-bottom: 1px solid {t.border};
+    }}
+    #RankCorner {{
+        background: transparent;
+        color: {t.text_muted};
+        font-size: {t.font_size_label}px;
+    }}
     """

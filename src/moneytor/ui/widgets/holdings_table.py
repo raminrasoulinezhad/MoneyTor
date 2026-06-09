@@ -17,8 +17,11 @@ from decimal import Decimal
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QAbstractButton,
     QAbstractItemView,
+    QHBoxLayout,
     QHeaderView,
+    QLabel,
     QTableWidget,
     QTableWidgetItem,
     QWidget,
@@ -84,6 +87,7 @@ class HoldingsTable(QTableWidget):
         vheader.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         vheader.setHighlightSections(False)
         vheader.setDefaultAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self._label_rank_corner()
 
         header = self.horizontalHeader()
         header.setSectionsClickable(True)
@@ -170,3 +174,20 @@ class HoldingsTable(QTableWidget):
         if align is not None:
             item.setTextAlignment(align)
         self.setItem(row, col, item)
+
+    def _label_rank_corner(self) -> None:
+        """Put ``#`` in the gutter's header corner (the top-left intersection).
+
+        The corner is a ``QTableCornerButton`` whose painter ignores any text it
+        is given, so we overlay a transparent label; its background is themed via
+        ``QTableView QTableCornerButton::section`` to match the column headers.
+        """
+        corner = self.findChild(QAbstractButton)
+        if corner is None:  # pragma: no cover - present in every Qt table view
+            return
+        layout = QHBoxLayout(corner)
+        layout.setContentsMargins(0, 0, 0, 0)
+        label = QLabel("#", corner)
+        label.setObjectName("RankCorner")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(label)

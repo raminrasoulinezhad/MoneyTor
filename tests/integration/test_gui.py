@@ -135,6 +135,14 @@ def test_rank_gutter_reflects_active_sort(qtbot) -> None:
     assert _rank_of(table, "VFV") == table.rowCount()
 
 
+def test_rank_corner_shows_hash(qtbot) -> None:
+    from PySide6.QtWidgets import QLabel
+
+    window = _window(qtbot)
+    corner = window.dashboard.table.findChild(QLabel, "RankCorner")
+    assert corner is not None and corner.text() == "#"
+
+
 def test_rank_index_is_stable_under_search(qtbot) -> None:
     window = _window(qtbot)
     table = window.dashboard.table
