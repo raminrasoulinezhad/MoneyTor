@@ -61,3 +61,15 @@ def test_sector_pie_aggregates_by_sector() -> None:
     assert "Information Technology" in html
     assert "Energy" in html
     assert "Unknown" in html
+
+
+def test_sector_pie_groups_small_sectors_into_other() -> None:
+    rows = (
+        _row("A", "9800", "0.0", sector="Information Technology"),
+        _row("B", "100", "0.0", sector="Energy"),  # 1% -> Other
+        _row("C", "100", "0.0", sector="Utilities"),  # 1% -> Other
+    )
+    html = sector_pie_html(rows, DARK)
+    assert "Information Technology" in html
+    assert "Other" in html
+    assert "Energy" not in html and "Utilities" not in html

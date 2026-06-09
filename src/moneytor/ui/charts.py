@@ -30,8 +30,9 @@ _PALETTE = [
     "#84cc16",
 ]
 
-# Holdings below this fraction of the portfolio are grouped into "Others".
-_OTHERS_THRESHOLD = Decimal("0.01")
+# Slices below these fractions of the total are grouped into a catch-all.
+_HOLDINGS_THRESHOLD = Decimal("0.01")  # holdings pie: < 1% -> "Others"
+_SECTOR_THRESHOLD = Decimal("0.02")  # sector pie: < 2% -> "Other"
 _UNKNOWN_SECTOR = "Unknown"
 
 
@@ -71,28 +72,38 @@ def allocation_donut_html(rows: Sequence[HoldingRow], tokens: ThemeTokens) -> st
     return _donut_html([r.symbol for r in rows], [r.value.amount for r in rows], tokens)
 
 
+def _grouped(
+    totals: dict[str, Decimal], threshold: Decimal, other_label: str
+) -> tuple[list[str], list[Decimal]]:
+    """Order slices by value desc, rolling those under ``threshold`` into one."""
+    grand = sum(totals.values(), Decimal("0"))
+    cutoff = grand * threshold
+    kept = sorted(
+        ((k, v) for k, v in totals.items() if grand == 0 or v >= cutoff),
+        key=lambda kv: kv[1],
+        reverse=True,
+    )
+    other = sum((v for v in totals.values() if grand > 0 and v < cutoff), Decimal("0"))
+    labels = [k for k, _ in kept]
+    values = [v for _, v in kept]
+    if other > 0:
+        labels.append(other_label)
+        values.append(other)
+    return labels, values
+
+
 def holdings_pie_html(rows: Sequence[HoldingRow], tokens: ThemeTokens) -> str:
     """Donut by symbol, grouping holdings under 1% of the portfolio into 'Others'."""
-    labels: list[str] = []
-    values: list[Decimal] = []
-    others = Decimal("0")
-    for row in rows:
-        if row.allocation > _OTHERS_THRESHOLD:
-            labels.append(row.symbol)
-            values.append(row.value.amount)
-        else:
-            others += row.value.amount
-    if others > 0:
-        labels.append("Others")
-        values.append(others)
+    totals: dict[str, Decimal] = {row.symbol: row.value.amount for row in rows}
+    labels, values = _grouped(totals, _HOLDINGS_THRESHOLD, "Others")
     return _donut_html(labels, values, tokens)
 
 
 def sector_pie_html(rows: Sequence[HoldingRow], tokens: ThemeTokens) -> str:
-    """Donut of allocation aggregated by GICS sector ('Unknown' when missing)."""
+    """Donut by GICS sector ('Unknown' when missing), sectors under 2% as 'Other'."""
     totals: dict[str, Decimal] = {}
     for row in rows:
         key = row.sector or _UNKNOWN_SECTOR
         totals[key] = totals.get(key, Decimal("0")) + row.value.amount
-    ordered = sorted(totals.items(), key=lambda kv: kv[1], reverse=True)
-    return _donut_html([k for k, _ in ordered], [v for _, v in ordered], tokens)
+    labels, values = _grouped(totals, _SECTOR_THRESHOLD, "Other")
+    return _donut_html(labels, values, tokens)
