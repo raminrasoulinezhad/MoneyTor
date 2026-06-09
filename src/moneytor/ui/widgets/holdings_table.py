@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from moneytor.formatting import format_quantity
+from moneytor.formatting import format_asset_class, format_quantity
 from moneytor.ui.viewmodels import HoldingRow
 
 _HEADERS = (
@@ -75,7 +75,7 @@ class HoldingsTable(QTableWidget):
             self._set(r, 0, row.symbol)
             self._set(r, 1, row.name)
             self._set(r, 2, row.sector or "—")
-            self._set(r, 3, row.asset_class.title())
+            self._set(r, 3, format_asset_class(row.asset_class))
             self._set_num(r, 4, format_quantity(row.quantity), row.quantity, right)
             self._set_num(r, 5, row.value.format(), row.value.amount, right)
             self._set_num(r, 6, row.allocation_pct, row.allocation, right)

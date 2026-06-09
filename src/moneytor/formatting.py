@@ -14,3 +14,12 @@ def format_quantity(quantity: Decimal) -> str:
     if "." in text:
         text = text.rstrip("0").rstrip(".")
     return text
+
+
+# Display overrides for asset-class labels (the value is the enum's .value).
+_ASSET_CLASS_LABELS = {"fixed_income": "Cash"}
+
+
+def format_asset_class(asset_class: str) -> str:
+    """Human label for a holding's asset class (fixed income shown as 'Cash')."""
+    return _ASSET_CLASS_LABELS.get(asset_class, asset_class.replace("_", " ").title())

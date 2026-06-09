@@ -6,7 +6,7 @@ from decimal import Decimal
 
 import pytest
 
-from moneytor.formatting import format_quantity
+from moneytor.formatting import format_asset_class, format_quantity
 
 
 @pytest.mark.parametrize(
@@ -24,3 +24,17 @@ from moneytor.formatting import format_quantity
 )
 def test_format_quantity(value: str, expected: str) -> None:
     assert format_quantity(Decimal(value)) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("fixed_income", "Cash"),  # the #20 relabel
+        ("equity", "Equity"),
+        ("etf", "Etf"),
+        ("crypto", "Crypto"),
+        ("cash", "Cash"),
+    ],
+)
+def test_format_asset_class(value: str, expected: str) -> None:
+    assert format_asset_class(value) == expected

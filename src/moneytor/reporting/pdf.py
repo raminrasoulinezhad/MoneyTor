@@ -11,7 +11,7 @@ from pathlib import Path
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
 
-from moneytor.formatting import format_quantity
+from moneytor.formatting import format_asset_class, format_quantity
 
 from .model import ReportModel, build_report
 
@@ -73,7 +73,7 @@ def render_pdf(report: ReportModel) -> bytes:
             row.cell(holding.symbol)
             row.cell(_latin1(holding.name))
             row.cell(_latin1(holding.sector or "-"))
-            row.cell(holding.asset_class.title())
+            row.cell(format_asset_class(holding.asset_class))
             row.cell(quantity)
             row.cell(holding.value.format())
             row.cell(f"{float(holding.allocation) * 100:.1f}%")

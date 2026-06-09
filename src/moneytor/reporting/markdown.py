@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from moneytor.formatting import format_quantity
+from moneytor.formatting import format_asset_class, format_quantity
 
 from .model import ReportModel, build_report
 
@@ -48,7 +48,7 @@ def render_markdown(report: ReportModel) -> str:
         quantity = format_quantity(holding.quantity)
         lines.append(
             f"| {holding.symbol} | {holding.name} | {holding.sector or '—'} "
-            f"| {holding.asset_class.title()} | {quantity} "
+            f"| {format_asset_class(holding.asset_class)} | {quantity} "
             f"| {holding.value.format()} | {_pct(holding.allocation)} |"
         )
     lines.append("")
