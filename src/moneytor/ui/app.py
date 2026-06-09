@@ -9,6 +9,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 
+from moneytor.aggregation import SectorMap, apply_sector_map
 from moneytor.config.errors import ConfigError
 from moneytor.config.settings import PersonCredentials, Settings, load_settings
 from moneytor.connectors import (
@@ -33,6 +34,19 @@ _LOG = logging.getLogger(__name__)
 _FALLBACK_USD_CAD = Decimal("1.36")
 
 _FIXTURE = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "mock_accounts.json"
+# Optional user-maintained ticker -> GICS sector overrides (fills broker gaps).
+_SECTOR_MAP_PATH = Path(".cache") / "sectors.json"
+
+
+def _load_sector_map() -> SectorMap:
+    """Load the optional ticker->sector override file, or an empty map."""
+    if not _SECTOR_MAP_PATH.exists():
+        return SectorMap()
+    try:
+        return SectorMap.from_file(_SECTOR_MAP_PATH)
+    except (OSError, ValueError) as exc:
+        _LOG.warning("Ignoring invalid sector map %s: %s", _SECTOR_MAP_PATH, exc)
+        return SectorMap()
 
 
 def demo_people() -> tuple[Person, ...]:
@@ -140,6 +154,7 @@ def run_app(argv: list[str] | None = None) -> int:
     # One provider instance, shared with the window and refreshed on every fetch
     # so USD<->CAD stays reasonably current without a live feed.
     provider = SnapshotFxProvider(_FALLBACK_USD_CAD)
+    sector_map = _load_sector_map()
 
     def loader() -> tuple[Person, ...]:
         provider.refresh()  # off the UI thread, alongside the data fetch
@@ -147,6 +162,7 @@ def run_app(argv: list[str] | None = None) -> int:
             fetched = live_people(settings, token_store, otp_provider)
         else:
             fetched = demo_people()
+        fetched = apply_sector_map(fetched, sector_map)
         cache.save(fetched, currency)
         return fetched
 
@@ -156,7 +172,7 @@ def run_app(argv: list[str] | None = None) -> int:
     elif has_credentials:
         people = ()  # filled by the cold-start reload below
     else:
-        people = demo_people()
+        people = apply_sector_map(demo_people(), sector_map)
 
     window = MainWindow(
         people=people,

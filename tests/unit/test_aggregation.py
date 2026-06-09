@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -9,10 +10,13 @@ import pytest
 
 from moneytor.aggregation import (
     AssetMap,
+    SectorMap,
     account_value,
     allocation_by_symbol,
+    apply_sector_map,
     build_snapshot,
     merge_holdings,
+    normalize_sector,
     person_value,
     totals_by_currency,
 )
@@ -173,3 +177,59 @@ def test_allocation_sums_to_one() -> None:
 def test_allocation_empty_portfolio() -> None:
     snapshot = build_snapshot((), CAD, PROVIDER)
     assert allocation_by_symbol(snapshot) == {}
+
+
+# --------------------------------------------------------------------------- #
+# Sector mapping
+# --------------------------------------------------------------------------- #
+
+
+def _person_with(holding: Holding) -> Person:
+    account = Account(
+        id="a1",
+        person_id="p1",
+        institution=Institution.QUESTRADE,
+        account_type=AccountType.TFSA,
+        cash=Money.zero(CAD),
+        holdings=(holding,),
+    )
+    return Person(id="p1", name="P", accounts=(account,))
+
+
+def test_sector_map_fills_only_empty_sectors() -> None:
+    sector_map = SectorMap({"shop": "Information Technology", "vfv": "Diversified"})
+    no_sector = _person_with(_holding("SHOP", "TSX", CAD, "1", "10"))
+    already = _person_with(replace(_holding("VFV", "TSX", CAD, "1", "10"), sector="Broker Sector"))
+
+    filled = apply_sector_map((no_sector, already), sector_map)
+    assert filled[0].accounts[0].holdings[0].sector == "Information Technology"
+    assert filled[1].accounts[0].holdings[0].sector == "Broker Sector"  # not overwritten
+
+
+def test_sector_map_unmapped_symbol_stays_empty() -> None:
+    filled = apply_sector_map((_person_with(_holding("ZZZ", "TSX", CAD, "1", "10")),), SectorMap())
+    assert filled[0].accounts[0].holdings[0].sector == ""
+
+
+def test_sector_carried_into_unified_holding() -> None:
+    holding = replace(_holding("SHOP", "TSX", CAD, "1", "10"), sector="Information Technology")
+    unified = merge_holdings((holding,), CAD, PROVIDER)
+    assert unified[0].sector == "Information Technology"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("FinancialServices", "Financials"),
+        ("BasicMaterials", "Materials"),
+        ("ConsumerDefensive", "Consumer Staples"),
+        ("Healthcare", "Health Care"),
+        ("Technology", "Information Technology"),
+        ("Energy", "Energy"),  # already canonical
+        ("Information Technology", "Information Technology"),  # GICS passes through
+        ("", ""),
+        ("Something Novel", "Something Novel"),  # unknown passes through
+    ],
+)
+def test_normalize_sector_maps_to_gics(raw: str, expected: str) -> None:
+    assert normalize_sector(raw) == expected

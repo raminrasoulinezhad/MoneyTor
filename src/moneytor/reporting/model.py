@@ -44,6 +44,7 @@ class HoldingLine:
     value: Money
     allocation: Decimal  # fraction 0..1
     name: str = ""
+    sector: str = ""
 
 
 @dataclass(frozen=True)
@@ -91,6 +92,7 @@ def build_report(
                 HoldingLine(
                     symbol=u.symbol,
                     name=u.name,
+                    sector=u.sector,
                     asset_class=u.asset_class.value,
                     quantity=u.total_quantity,
                     value=u.total_market_value,

@@ -26,6 +26,7 @@ from typing import Any
 
 import httpx
 
+from moneytor.aggregation.normalize import normalize_sector
 from moneytor.domain.enums import AccountType, AssetClass, Currency, Institution
 from moneytor.domain.models import Account, Holding
 from moneytor.domain.money import Money
@@ -64,6 +65,7 @@ class _SymbolInfo:
     currency: Currency
     asset_class: AssetClass
     name: str = ""
+    sector: str = ""
 
 
 class QuestradeConnector:
@@ -145,6 +147,7 @@ class QuestradeConnector:
         return Holding(
             symbol=str(node["symbol"]),
             name=info.name,
+            sector=info.sector,
             exchange="",
             asset_class=info.asset_class,
             quantity=_decimal(node.get("openQuantity", 0), "position.openQuantity"),
@@ -196,6 +199,7 @@ class QuestradeConnector:
                 currency=_currency(symbol.get("currency"), "symbol.currency"),
                 asset_class=_SECURITY_TYPES.get(str(symbol.get("securityType")), AssetClass.OTHER),
                 name=str(symbol.get("description") or ""),
+                sector=normalize_sector(str(symbol.get("industrySector") or "")),
             )
         return info
 

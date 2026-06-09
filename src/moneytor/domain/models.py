@@ -30,6 +30,7 @@ class Holding:
     book_value: Money
     market_value: Money
     name: str = ""  # human-readable company/fund name, when the broker supplies it
+    sector: str = ""  # GICS sector, when known (broker-supplied or file override)
 
 
 @dataclass(frozen=True)
@@ -76,6 +77,7 @@ class UnifiedHolding:
     total_market_value: Money
     sources: tuple[Holding, ...] = field(default_factory=tuple)
     name: str = ""
+    sector: str = ""
 
 
 @dataclass(frozen=True)

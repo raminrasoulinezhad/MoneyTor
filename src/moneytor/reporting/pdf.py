@@ -17,7 +17,7 @@ from .model import ReportModel, build_report
 
 __all__ = ["build_report", "render_pdf", "write_pdf"]
 
-_HEADERS = ("Symbol", "Name", "Class", "Quantity", "Market Value", "Allocation")
+_HEADERS = ("Symbol", "Name", "Sector", "Class", "Quantity", "Market Value", "Allocation")
 
 
 def _latin1(text: str) -> str:
@@ -72,6 +72,7 @@ def render_pdf(report: ReportModel) -> bytes:
             row = table.row()
             row.cell(holding.symbol)
             row.cell(_latin1(holding.name))
+            row.cell(_latin1(holding.sector or "-"))
             row.cell(holding.asset_class.title())
             row.cell(quantity)
             row.cell(holding.value.format())

@@ -37,6 +37,7 @@ def _holding_from(node: Mapping[str, Any]) -> Holding:
         return Holding(
             symbol=str(node["symbol"]),
             name=str(node.get("name", "")),
+            sector=str(node.get("sector", "")),
             exchange=str(node["exchange"]),
             asset_class=AssetClass(node["asset_class"]),
             quantity=Decimal(str(node["quantity"])),

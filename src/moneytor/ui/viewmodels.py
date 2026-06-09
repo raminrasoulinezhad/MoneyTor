@@ -31,6 +31,7 @@ class HoldingRow:
     value: Money
     allocation: Decimal  # fraction of total (0..1)
     name: str = ""
+    sector: str = ""
 
     @property
     def allocation_pct(self) -> str:
@@ -129,6 +130,7 @@ def build_dashboard_view_model(
                 HoldingRow(
                     symbol=u.symbol,
                     name=u.name,
+                    sector=u.sector,
                     asset_class=u.asset_class.value,
                     quantity=u.total_quantity,
                     value=u.total_market_value,
