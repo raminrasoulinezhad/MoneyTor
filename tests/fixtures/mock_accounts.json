@@ -8,6 +8,7 @@
     "holdings": [
       {
         "symbol": "SHOP",
+        "name": "Shopify Inc.",
         "exchange": "TSX",
         "asset_class": "equity",
         "quantity": "10",
@@ -16,6 +17,7 @@
       },
       {
         "symbol": "VFV",
+        "name": "Vanguard S&P 500 Index ETF",
         "exchange": "TSX",
         "asset_class": "etf",
         "quantity": "25",
@@ -33,6 +35,7 @@
     "holdings": [
       {
         "symbol": "AAPL",
+        "name": "Apple Inc.",
         "exchange": "NASDAQ",
         "asset_class": "equity",
         "quantity": "5",

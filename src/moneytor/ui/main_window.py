@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime
 
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -77,6 +78,9 @@ class MainWindow(QMainWindow):
         body.addWidget(self.dashboard, stretch=1)
         outer.addLayout(body, stretch=1)
         self.setCentralWidget(central)
+
+        find_shortcut = QShortcut(QKeySequence.StandardKey.Find, self)
+        find_shortcut.activated.connect(self.dashboard.focus_search)
 
         self.apply_theme(theme)
         self.set_people(people)

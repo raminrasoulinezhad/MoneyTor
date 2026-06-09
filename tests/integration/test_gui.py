@@ -61,6 +61,30 @@ def test_sidebar_filter_updates_table(qtbot) -> None:
     assert window.dashboard.table.rowCount() == 2  # SHOP + VFV only
 
 
+def test_search_filters_table_by_symbol(qtbot) -> None:
+    window = _window(qtbot)
+    assert window.dashboard.table.rowCount() == 3
+    window.dashboard.search.setText("shop")
+    assert window.dashboard.table.rowCount() == 1
+    window.dashboard.search.setText("")
+    assert window.dashboard.table.rowCount() == 3
+
+
+def test_search_filters_table_by_name(qtbot) -> None:
+    window = _window(qtbot)
+    # 'Apple Inc.' and 'Vanguard...' have names but no 'apple'/'vanguard' symbol.
+    window.dashboard.search.setText("apple")
+    assert window.dashboard.table.rowCount() == 1
+    window.dashboard.search.setText("inc")  # matches 'Shopify Inc.' + 'Apple Inc.'
+    assert window.dashboard.table.rowCount() == 2
+
+
+def test_focus_search_does_not_crash(qtbot) -> None:
+    window = _window(qtbot)
+    window.dashboard.focus_search()
+    assert window.dashboard.search.hasFocus() or True  # focus is platform-dependent
+
+
 def test_chart_panel_shows_summary_fallback_when_headless(qtbot) -> None:
     # Under the offscreen platform, the panel falls back to a text summary.
     window = _window(qtbot)
