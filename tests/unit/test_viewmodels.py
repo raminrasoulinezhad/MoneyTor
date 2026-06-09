@@ -74,7 +74,8 @@ def test_high_52w_pct_computed_in_native_currency() -> None:
 
     from moneytor.domain import Account, AccountType, AssetClass, Holding, Institution, Money
 
-    # AAPL: 2 shares worth $300 USD total -> $150/share; 52w high $200 USD -> 75%.
+    # AAPL: 2 shares worth $300 USD total -> $150/share; 52w high $200 USD.
+    # 52WHG = (200 - 150) / 200 = 25% below the high.
     holding = Holding(
         symbol="AAPL",
         exchange="NASDAQ",
@@ -95,8 +96,8 @@ def test_high_52w_pct_computed_in_native_currency() -> None:
     people = (Person(id="p", name="P", accounts=(account,)),)
     vm = build_dashboard_view_model(build_snapshot(people, CAD, PROVIDER), PROVIDER)
     row = next(r for r in vm.rows if r.symbol == "AAPL")
-    assert row.high_52w_pct == Decimal("0.75")
-    assert row.high_52w_text == "75.0%"
+    assert row.high_52w_pct == Decimal("0.25")
+    assert row.high_52w_text == "25.0%"
 
     # A holding without a 52-week high reports None / "—".
     bare = replace(holding, symbol="ZZZ", high_52w=None)

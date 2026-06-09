@@ -22,16 +22,18 @@ from moneytor.fx.provider import FxProvider
 
 
 def _high_52w_pct(holding: UnifiedHolding) -> Decimal | None:
-    """Current price as a fraction of the 52-week high, or None if unavailable.
+    """How far below the 52-week high the current price sits, as a fraction.
 
-    Computed in the security's native currency (both the 52-week high and the
-    summed source market values are native), so it is FX-independent.
+    ``(52-week high - current price) / 52-week high`` — 0 means at the high,
+    larger means further below it. Computed in the security's native currency
+    (both the high and the summed source market values are native), so it is
+    FX-independent. Returns None when the high is unavailable.
     """
     if holding.high_52w is None or holding.high_52w.amount == 0 or holding.total_quantity == 0:
         return None
     native_value = sum((s.market_value.amount for s in holding.sources), Decimal("0"))
     current_price = native_value / holding.total_quantity
-    return current_price / holding.high_52w.amount
+    return (holding.high_52w.amount - current_price) / holding.high_52w.amount
 
 
 @dataclass(frozen=True)
