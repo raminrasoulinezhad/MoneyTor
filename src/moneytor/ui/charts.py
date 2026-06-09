@@ -43,10 +43,14 @@ def _donut_html(labels: Sequence[str], values: Sequence[Decimal], tokens: ThemeT
             go.Pie(
                 labels=list(labels),
                 values=[float(v) for v in values],
-                hole=0.58,
+                hole=0.5,
                 marker={"colors": _PALETTE, "line": {"color": tokens.surface, "width": 2}},
-                textinfo="label+percent",
-                textfont={"color": tokens.text},
+                # Symbol-only labels drawn on the slices keep the pie large;
+                # the percentage is still available on hover.
+                textinfo="label",
+                textposition="inside",
+                insidetextorientation="horizontal",
+                textfont={"color": "white", "size": 13},
                 hovertemplate="%{label}<br>%{percent}<extra></extra>",
                 sort=False,
             )
@@ -57,8 +61,8 @@ def _donut_html(labels: Sequence[str], values: Sequence[Decimal], tokens: ThemeT
         plot_bgcolor=tokens.surface,
         font={"color": tokens.text, "family": tokens.font_family},
         showlegend=False,
-        margin={"t": 10, "b": 10, "l": 10, "r": 10},
-        height=300,
+        margin={"t": 8, "b": 8, "l": 8, "r": 8},
+        height=440,
     )
     return figure.to_html(
         include_plotlyjs="inline",
