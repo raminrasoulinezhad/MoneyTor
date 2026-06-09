@@ -54,6 +54,13 @@ _SECURITY_TYPES: dict[str, AssetClass] = {
 }
 
 
+def _price(value: Any, currency: Currency) -> Money | None:
+    """Build a per-share price Money, or None when the broker omits/zeroes it."""
+    if value in (None, 0, "0", ""):
+        return None
+    return Money(_decimal(value, "highPrice52"), currency)
+
+
 @dataclass(frozen=True)
 class _Session:
     access_token: str
@@ -66,6 +73,7 @@ class _SymbolInfo:
     asset_class: AssetClass
     name: str = ""
     sector: str = ""
+    high_52w: Money | None = None
 
 
 class QuestradeConnector:
@@ -148,6 +156,7 @@ class QuestradeConnector:
             symbol=str(node["symbol"]),
             name=info.name,
             sector=info.sector,
+            high_52w=info.high_52w,
             exchange="",
             asset_class=info.asset_class,
             quantity=_decimal(node.get("openQuantity", 0), "position.openQuantity"),
@@ -195,11 +204,13 @@ class QuestradeConnector:
         node = self._get("v1/symbols", params={"ids": joined})
         info: dict[int, _SymbolInfo] = {}
         for symbol in node.get("symbols", []):
+            currency = _currency(symbol.get("currency"), "symbol.currency")
             info[int(symbol["symbolId"])] = _SymbolInfo(
-                currency=_currency(symbol.get("currency"), "symbol.currency"),
+                currency=currency,
                 asset_class=_SECURITY_TYPES.get(str(symbol.get("securityType")), AssetClass.OTHER),
                 name=str(symbol.get("description") or ""),
                 sector=normalize_sector(str(symbol.get("industrySector") or "")),
+                high_52w=_price(symbol.get("highPrice52"), currency),
             )
         return info
 

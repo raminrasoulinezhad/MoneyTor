@@ -16,9 +16,22 @@ from moneytor.aggregation import (
     person_value,
 )
 from moneytor.domain.enums import Currency
-from moneytor.domain.models import Person, PortfolioSnapshot
+from moneytor.domain.models import Person, PortfolioSnapshot, UnifiedHolding
 from moneytor.domain.money import Money
 from moneytor.fx.provider import FxProvider
+
+
+def _high_52w_pct(holding: UnifiedHolding) -> Decimal | None:
+    """Current price as a fraction of the 52-week high, or None if unavailable.
+
+    Computed in the security's native currency (both the 52-week high and the
+    summed source market values are native), so it is FX-independent.
+    """
+    if holding.high_52w is None or holding.high_52w.amount == 0 or holding.total_quantity == 0:
+        return None
+    native_value = sum((s.market_value.amount for s in holding.sources), Decimal("0"))
+    current_price = native_value / holding.total_quantity
+    return current_price / holding.high_52w.amount
 
 
 @dataclass(frozen=True)
@@ -32,10 +45,17 @@ class HoldingRow:
     allocation: Decimal  # fraction of total (0..1)
     name: str = ""
     sector: str = ""
+    high_52w_pct: Decimal | None = None  # current price / 52-week high (0..1+)
 
     @property
     def allocation_pct(self) -> str:
         return f"{self.allocation * 100:.1f}%"
+
+    @property
+    def high_52w_text(self) -> str:
+        if self.high_52w_pct is None:
+            return "—"
+        return f"{self.high_52w_pct * 100:.1f}%"
 
 
 @dataclass(frozen=True)
@@ -135,6 +155,7 @@ def build_dashboard_view_model(
                     quantity=u.total_quantity,
                     value=u.total_market_value,
                     allocation=allocations.get(u.symbol, Decimal("0")),
+                    high_52w_pct=_high_52w_pct(u),
                 )
                 for u in snapshot.unified_holdings
             ),

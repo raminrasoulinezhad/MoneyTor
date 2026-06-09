@@ -17,8 +17,19 @@ from PySide6.QtWidgets import (
 from moneytor.formatting import format_quantity
 from moneytor.ui.viewmodels import HoldingRow
 
-_HEADERS = ("Symbol", "Name", "Sector", "Class", "Quantity", "Market Value", "Allocation")
+_HEADERS = (
+    "Symbol",
+    "Name",
+    "Sector",
+    "Class",
+    "Quantity",
+    "Market Value",
+    "Allocation",
+    "52WHG",
+)
 _VALUE_COLUMN = 5  # default sort column (descending)
+# Sort key for cells with no value, so they cluster at the bottom.
+_NO_VALUE = Decimal("-1")
 
 
 class _NumericItem(QTableWidgetItem):
@@ -68,6 +79,8 @@ class HoldingsTable(QTableWidget):
             self._set_num(r, 4, format_quantity(row.quantity), row.quantity, right)
             self._set_num(r, 5, row.value.format(), row.value.amount, right)
             self._set_num(r, 6, row.allocation_pct, row.allocation, right)
+            high_key = row.high_52w_pct if row.high_52w_pct is not None else _NO_VALUE
+            self._set_num(r, 7, row.high_52w_text, high_key, right)
         self.setSortingEnabled(True)
 
     def _set(

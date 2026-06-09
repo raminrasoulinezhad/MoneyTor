@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
@@ -105,12 +106,17 @@ query Positions($identityId: ID!, $currency: Currency!, $cursor: String) {
             accounts { id }
             bookValue { amount currency }
             totalValue { amount currency }
-            security { securityType stock { symbol name primaryExchange } }
+            security { id securityType stock { symbol name primaryExchange } }
           } }
         }
       }
     }
   }
+}
+"""
+_MARKET_DATA_QUERY = """
+query SecurityMarketData($id: ID!) {
+  security(id: $id) { id fundamentals { high52Week } }
 }
 """
 _BALANCES_QUERY = """
@@ -283,7 +289,22 @@ class WealthsimpleConnector:
                 return nodes
 
     def _positions_by_account(self, identity: str) -> dict[str, list[Holding]]:
+        nodes = self._position_nodes(identity)
+        security_ids = sorted(
+            {sid for node in nodes if (sid := _security_id(node))}
+        )
+        highs = self._high_52w_by_security(security_ids)
+
         grouped: dict[str, list[Holding]] = {}
+        for node in nodes:
+            holding = self._map_position(node, highs)
+            for owner in node.get("accounts") or []:
+                if isinstance(owner, dict) and owner.get("id"):
+                    grouped.setdefault(str(owner["id"]), []).append(holding)
+        return grouped
+
+    def _position_nodes(self, identity: str) -> list[dict[str, Any]]:
+        nodes: list[dict[str, Any]] = []
         cursor: str | None = None
         while True:
             data = self._graphql(
@@ -292,14 +313,31 @@ class WealthsimpleConnector:
                 {"identityId": identity, "currency": Currency.CAD.value, "cursor": cursor},
             )
             connection = _nested(data, "identity", "financials", "current", "positions")
-            for node in _edge_nodes(connection):
-                holding = self._map_position(node)
-                for owner in node.get("accounts") or []:
-                    if isinstance(owner, dict) and owner.get("id"):
-                        grouped.setdefault(str(owner["id"]), []).append(holding)
+            nodes.extend(_edge_nodes(connection))
             cursor = _next_cursor(connection)
             if cursor is None:
-                return grouped
+                return nodes
+
+    def _high_52w_by_security(self, security_ids: list[str]) -> dict[str, Decimal]:
+        """52-week-high price per security id (one fundamentals call each).
+
+        Best-effort: a security whose fundamentals fail/omit the value is simply
+        absent from the result (its 52WHG shows as "—"). This is the slow part of
+        a Wealthsimple fetch — one request per distinct holding.
+        """
+        highs: dict[str, Decimal] = {}
+        for sid in security_ids:
+            try:
+                data = self._graphql("SecurityMarketData", _MARKET_DATA_QUERY, {"id": sid})
+            except ConnectorError:
+                continue
+            security = data.get("security") if isinstance(data.get("security"), dict) else {}
+            fundamentals = security.get("fundamentals") or {}
+            value = fundamentals.get("high52Week")
+            if value is not None:
+                with suppress(FetchError):
+                    highs[sid] = to_decimal(value, "fundamentals.high52Week")
+        return highs
 
     def _balances_by_account(self, account_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
         data = self._graphql("Balances", _BALANCES_QUERY, {"ids": account_ids, "type": "TRADING"})
@@ -334,10 +372,12 @@ class WealthsimpleConnector:
             holdings=holdings,
         )
 
-    def _map_position(self, node: dict[str, Any]) -> Holding:
+    def _map_position(self, node: dict[str, Any], highs: dict[str, Decimal]) -> Holding:
         security = node.get("security") if isinstance(node.get("security"), dict) else {}
         stock = security.get("stock") if isinstance(security.get("stock"), dict) else {}
         symbol = stock.get("symbol") or security.get("id") or "UNKNOWN"
+        market_value = _money_or_zero(node.get("totalValue"), "position.totalValue")
+        high = highs.get(_security_id(node))
         return Holding(
             symbol=str(symbol),
             name=str(stock.get("name") or ""),
@@ -345,7 +385,8 @@ class WealthsimpleConnector:
             asset_class=_SECURITY_TYPES.get(str(security.get("securityType")), AssetClass.OTHER),
             quantity=to_decimal(node.get("quantity", 0), "position.quantity"),
             book_value=_money_or_zero(node.get("bookValue"), "position.bookValue"),
-            market_value=_money_or_zero(node.get("totalValue"), "position.totalValue"),
+            market_value=market_value,
+            high_52w=Money(high, market_value.currency) if high is not None else None,
         )
 
     def _map_cash(self, entries: list[dict[str, Any]]) -> tuple[Money, tuple[Holding, ...]]:
@@ -443,3 +484,8 @@ def _next_cursor(connection: dict[str, Any]) -> str | None:
 
 def _money_or_zero(node: Any, where: str) -> Money:
     return to_money(node, where) if isinstance(node, dict) else Money.zero(Currency.CAD)
+
+
+def _security_id(node: dict[str, Any]) -> str:
+    security = node.get("security") if isinstance(node.get("security"), dict) else {}
+    return str(security.get("id") or "")

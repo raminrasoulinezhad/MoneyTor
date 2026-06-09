@@ -19,8 +19,8 @@ from moneytor.domain.money import Money
 
 DEFAULT_CACHE_PATH = Path(".cache") / "snapshot.json"
 # Bump when the serialized holding/account shape changes so stale caches
-# (e.g. missing name/sector) are ignored rather than shown with blank fields.
-_SCHEMA_VERSION = 2
+# (e.g. missing name/sector/52w) are ignored rather than shown with blank fields.
+_SCHEMA_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -46,6 +46,7 @@ def _holding_dict(holding: Holding) -> dict[str, Any]:
         "quantity": str(holding.quantity),
         "book_value": _money_dict(holding.book_value),
         "market_value": _money_dict(holding.market_value),
+        "high_52w": _money_dict(holding.high_52w) if holding.high_52w is not None else None,
     }
 
 
@@ -82,6 +83,7 @@ def _holding(node: Any) -> Holding:
         quantity=Decimal(str(node["quantity"])),
         book_value=_money(node["book_value"]),
         market_value=_money(node["market_value"]),
+        high_52w=_money(node["high_52w"]) if node.get("high_52w") else None,
     )
 
 

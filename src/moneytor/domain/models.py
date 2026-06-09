@@ -31,6 +31,7 @@ class Holding:
     market_value: Money
     name: str = ""  # human-readable company/fund name, when the broker supplies it
     sector: str = ""  # GICS sector, when known (broker-supplied or file override)
+    high_52w: Money | None = None  # 52-week-high price per share (native currency)
 
 
 @dataclass(frozen=True)
@@ -78,6 +79,7 @@ class UnifiedHolding:
     sources: tuple[Holding, ...] = field(default_factory=tuple)
     name: str = ""
     sector: str = ""
+    high_52w: Money | None = None
 
 
 @dataclass(frozen=True)

@@ -48,6 +48,7 @@ def merge_holdings(
                 sources=tuple(members),
                 name=next((m.name for m in members if m.name), ""),
                 sector=next((m.sector for m in members if m.sector), ""),
+                high_52w=next((m.high_52w for m in members if m.high_52w is not None), None),
             )
         )
     return tuple(unified)

@@ -47,6 +47,7 @@ _SYMBOLS = {
             "securityType": "Stock",
             "description": "Apple Inc.",
             "industrySector": "Information Technology",
+            "highPrice52": 200.00,
         }
     ]
 }
@@ -174,6 +175,7 @@ def test_fetch_accounts_maps_payload(tmp_path: Path) -> None:
     aapl = next(h for h in account.holdings if h.symbol == "AAPL")
     assert aapl.name == "Apple Inc."
     assert aapl.sector == "Information Technology"
+    assert aapl.high_52w == Money.of("200.00", Currency.USD)
     assert aapl.asset_class is AssetClass.EQUITY
     assert aapl.quantity == Decimal("10")
     assert aapl.market_value == Money.of("1950.50", Currency.USD)

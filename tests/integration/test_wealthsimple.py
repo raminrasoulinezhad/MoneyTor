@@ -62,6 +62,7 @@ _POSITIONS = {
                                     "bookValue": {"amount": "600.00", "currency": "CAD"},
                                     "totalValue": {"amount": "720.00", "currency": "CAD"},
                                     "security": {
+                                        "id": "sec-veqt",
                                         "securityType": "ETF",
                                         "stock": {
                                             "symbol": "VEQT",
@@ -98,7 +99,16 @@ _BALANCES = {
     }
 }
 
-_GRAPHQL_RESPONSES = {"Accounts": _ACCOUNTS, "Positions": _POSITIONS, "Balances": _BALANCES}
+_MARKET_DATA = {
+    "data": {"security": {"id": "sec-veqt", "fundamentals": {"high52Week": "40.00"}}}
+}
+
+_GRAPHQL_RESPONSES = {
+    "Accounts": _ACCOUNTS,
+    "Positions": _POSITIONS,
+    "Balances": _BALANCES,
+    "SecurityMarketData": _MARKET_DATA,
+}
 
 
 def _data_handler(request: httpx.Request) -> httpx.Response | None:
@@ -247,6 +257,7 @@ def test_maps_positions_and_cash(tmp_path: Path) -> None:
     veqt = account.holdings[0]
     assert veqt.symbol == "VEQT"
     assert veqt.name == "Vanguard All-Equity ETF"
+    assert veqt.high_52w == Money.of("40.00", Currency.CAD)  # from fundamentals
     assert veqt.exchange == "TSX"
     assert veqt.asset_class is AssetClass.ETF
     assert veqt.quantity == Decimal("20")

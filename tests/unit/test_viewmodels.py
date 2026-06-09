@@ -65,3 +65,42 @@ def test_empty_selection_via_none_shows_all() -> None:
     people = _people()
     vm = view_model_for(people, CAD, PROVIDER, account_ids=None)
     assert vm.holding_count == 3
+
+
+def test_high_52w_pct_computed_in_native_currency() -> None:
+    from dataclasses import replace
+
+    from moneytor.domain import Account, AccountType, AssetClass, Holding, Institution, Money
+
+    # AAPL: 2 shares worth $300 USD total -> $150/share; 52w high $200 USD -> 75%.
+    holding = Holding(
+        symbol="AAPL",
+        exchange="NASDAQ",
+        asset_class=AssetClass.EQUITY,
+        quantity=Decimal("2"),
+        book_value=Money.of("250", USD),
+        market_value=Money.of("300", USD),
+        high_52w=Money.of("200", USD),
+    )
+    account = Account(
+        id="a",
+        person_id="p",
+        institution=Institution.QUESTRADE,
+        account_type=AccountType.MARGIN,
+        cash=Money.zero(USD),
+        holdings=(holding,),
+    )
+    people = (Person(id="p", name="P", accounts=(account,)),)
+    vm = build_dashboard_view_model(build_snapshot(people, CAD, PROVIDER), PROVIDER)
+    row = next(r for r in vm.rows if r.symbol == "AAPL")
+    assert row.high_52w_pct == Decimal("0.75")
+    assert row.high_52w_text == "75.0%"
+
+    # A holding without a 52-week high reports None / "—".
+    bare = replace(holding, symbol="ZZZ", high_52w=None)
+    account2 = replace(account, holdings=(bare,))
+    vm2 = build_dashboard_view_model(
+        build_snapshot((Person(id="p", name="P", accounts=(account2,)),), CAD, PROVIDER), PROVIDER
+    )
+    assert vm2.rows[0].high_52w_pct is None
+    assert vm2.rows[0].high_52w_text == "—"
