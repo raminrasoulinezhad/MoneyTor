@@ -8,10 +8,12 @@ back to a compact text summary, so the app and its tests run anywhere.
 
 from __future__ import annotations
 
+import tempfile
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
@@ -46,6 +48,7 @@ class ChartPanel(QWidget):
         # Lazily created QWebEngineView; Any because the import is optional and
         # platform-dependent (justified deviation from the no-Any rule).
         self._webview: Any = None
+        self._html_path: str | None = None
 
     def set_allocation(self, rows: Sequence[HoldingRow], tokens: ThemeTokens = DARK) -> None:
         """Render the allocation donut for ``rows`` (or a fallback message)."""
@@ -53,9 +56,7 @@ class ChartPanel(QWidget):
             self._show_text("No holdings for this selection.")
             return
         if self._ensure_webview():
-            self._webview.setHtml(allocation_donut_html(rows, tokens))
-            self._webview.show()
-            self._body.hide()
+            self._render_html(allocation_donut_html(rows, tokens))
         else:
             self._show_text(_summary(rows))
 
@@ -64,6 +65,24 @@ class ChartPanel(QWidget):
         self._show_text(text)
 
     # -- internals ---------------------------------------------------------- #
+
+    def _render_html(self, html: str) -> None:
+        """Load Plotly HTML via a temp file.
+
+        ``QWebEngineView.setHtml`` silently fails for content over ~2 MB, and
+        the inline-Plotly document is several MB, so we write it to a file and
+        load it by URL instead (no size limit, works offline).
+        """
+        if self._html_path is None:
+            handle = tempfile.NamedTemporaryFile(  # noqa: SIM115 - kept for the panel's lifetime
+                mode="w", suffix=".html", prefix="moneytor_chart_", delete=False, encoding="utf-8"
+            )
+            handle.close()
+            self._html_path = handle.name
+        Path(self._html_path).write_text(html, encoding="utf-8")
+        self._webview.setUrl(QUrl.fromLocalFile(self._html_path))
+        self._webview.show()
+        self._body.hide()
 
     def _show_text(self, text: str) -> None:
         if self._webview is not None:
