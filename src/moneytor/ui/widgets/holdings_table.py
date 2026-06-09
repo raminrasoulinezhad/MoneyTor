@@ -56,7 +56,15 @@ class HoldingsTable(QTableWidget):
         self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.setSortingEnabled(True)
-        self.verticalHeader().setVisible(False)
+        # The vertical header is a rank gutter: its 1-based numbers are rendered
+        # by visual row position, so they always read 1..N top-to-bottom and
+        # re-number automatically whenever the user re-sorts by any column —
+        # giving each holding's standing under the active sort.
+        vheader = self.verticalHeader()
+        vheader.setVisible(True)
+        vheader.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        vheader.setHighlightSections(False)
+        vheader.setDefaultAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         header = self.horizontalHeader()
         header.setSortIndicator(_VALUE_COLUMN, Qt.SortOrder.DescendingOrder)
         # The Name column absorbs spare width; the rest size to their content.

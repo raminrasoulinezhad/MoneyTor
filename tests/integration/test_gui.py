@@ -116,6 +116,29 @@ def test_table_sorts_market_value_numerically(qtbot) -> None:
     assert amounts == sorted(amounts)
 
 
+def test_rank_gutter_reflects_active_sort(qtbot) -> None:
+    from PySide6.QtCore import Qt
+
+    window = _window(qtbot)
+    table = window.dashboard.table
+    assert not table.verticalHeader().isHidden()  # rank gutter shown
+
+    def rank_of(symbol: str) -> int:
+        for r in range(table.rowCount()):
+            if table.item(r, 0).text() == symbol:
+                # Vertical header is 1-based and tracks visual row order.
+                return int(table.model().headerData(r, Qt.Orientation.Vertical))
+        raise AssertionError(symbol)
+
+    # Sort by Market Value descending: the largest holding ranks #1.
+    table.sortItems(5, Qt.SortOrder.DescendingOrder)
+    assert rank_of("VFV") == 1  # VFV 3100 is the largest in the fixture
+
+    # Re-sort ascending: ranks flip, so VFV now sits last.
+    table.sortItems(5, Qt.SortOrder.AscendingOrder)
+    assert rank_of("VFV") == table.rowCount()
+
+
 def test_chart_selector_switches_to_sectors(qtbot) -> None:
     window = _window(qtbot)
     panel = window.dashboard.chart_panel
