@@ -29,6 +29,7 @@ class Holding:
     quantity: Decimal
     book_value: Money
     market_value: Money
+    name: str = ""  # human-readable company/fund name, when the broker supplies it
 
 
 @dataclass(frozen=True)
@@ -74,6 +75,7 @@ class UnifiedHolding:
     total_quantity: Decimal
     total_market_value: Money
     sources: tuple[Holding, ...] = field(default_factory=tuple)
+    name: str = ""
 
 
 @dataclass(frozen=True)

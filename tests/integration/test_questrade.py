@@ -39,7 +39,15 @@ _BALANCES = {
     ]
 }
 _SYMBOLS = {
-    "symbols": [{"symbol": "AAPL", "symbolId": 8049, "currency": "USD", "securityType": "Stock"}]
+    "symbols": [
+        {
+            "symbol": "AAPL",
+            "symbolId": 8049,
+            "currency": "USD",
+            "securityType": "Stock",
+            "description": "Apple Inc.",
+        }
+    ]
 }
 
 _TOKEN_OK = {
@@ -163,6 +171,7 @@ def test_fetch_accounts_maps_payload(tmp_path: Path) -> None:
     assert account.cash == Money.of("1000.00", Currency.CAD)
 
     aapl = next(h for h in account.holdings if h.symbol == "AAPL")
+    assert aapl.name == "Apple Inc."
     assert aapl.asset_class is AssetClass.EQUITY
     assert aapl.quantity == Decimal("10")
     assert aapl.market_value == Money.of("1950.50", Currency.USD)

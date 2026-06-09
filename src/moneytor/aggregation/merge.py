@@ -46,6 +46,7 @@ def merge_holdings(
                 total_quantity=total_quantity,
                 total_market_value=total_value.quantize(),
                 sources=tuple(members),
+                name=next((m.name for m in members if m.name), ""),
             )
         )
     return tuple(unified)

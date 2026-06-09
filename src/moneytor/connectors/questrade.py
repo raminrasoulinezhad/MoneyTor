@@ -63,6 +63,7 @@ class _Session:
 class _SymbolInfo:
     currency: Currency
     asset_class: AssetClass
+    name: str = ""
 
 
 class QuestradeConnector:
@@ -143,6 +144,7 @@ class QuestradeConnector:
             raise FetchError(f"Missing symbol info for position {node.get('symbol')!r}.")
         return Holding(
             symbol=str(node["symbol"]),
+            name=info.name,
             exchange="",
             asset_class=info.asset_class,
             quantity=_decimal(node.get("openQuantity", 0), "position.openQuantity"),
@@ -193,6 +195,7 @@ class QuestradeConnector:
             info[int(symbol["symbolId"])] = _SymbolInfo(
                 currency=_currency(symbol.get("currency"), "symbol.currency"),
                 asset_class=_SECURITY_TYPES.get(str(symbol.get("securityType")), AssetClass.OTHER),
+                name=str(symbol.get("description") or ""),
             )
         return info
 

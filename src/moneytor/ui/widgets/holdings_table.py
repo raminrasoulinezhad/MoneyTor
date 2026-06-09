@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 from moneytor.formatting import format_quantity
 from moneytor.ui.viewmodels import HoldingRow
 
-_HEADERS = ("Symbol", "Class", "Quantity", "Market Value", "Allocation")
+_HEADERS = ("Symbol", "Name", "Class", "Quantity", "Market Value", "Allocation")
 
 
 class HoldingsTable(QTableWidget):
@@ -31,9 +31,11 @@ class HoldingsTable(QTableWidget):
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.verticalHeader().setVisible(False)
         header = self.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for col in range(1, len(_HEADERS)):
-            header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+        # The Name column absorbs spare width; the rest size to their content.
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        for col in range(len(_HEADERS)):
+            if col != 1:
+                header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
 
     def set_rows(self, rows: Sequence[HoldingRow]) -> None:
         """Replace all rows with ``rows``."""
@@ -41,10 +43,11 @@ class HoldingsTable(QTableWidget):
         right = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         for r, row in enumerate(rows):
             self._set(r, 0, row.symbol)
-            self._set(r, 1, row.asset_class.title())
-            self._set(r, 2, format_quantity(row.quantity), right)
-            self._set(r, 3, row.value.format(), right)
-            self._set(r, 4, row.allocation_pct, right)
+            self._set(r, 1, row.name)
+            self._set(r, 2, row.asset_class.title())
+            self._set(r, 3, format_quantity(row.quantity), right)
+            self._set(r, 4, row.value.format(), right)
+            self._set(r, 5, row.allocation_pct, right)
 
     def _set(
         self,

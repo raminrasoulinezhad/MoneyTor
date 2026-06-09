@@ -63,7 +63,11 @@ _POSITIONS = {
                                     "totalValue": {"amount": "720.00", "currency": "CAD"},
                                     "security": {
                                         "securityType": "ETF",
-                                        "stock": {"symbol": "VEQT", "primaryExchange": "TSX"},
+                                        "stock": {
+                                            "symbol": "VEQT",
+                                            "name": "Vanguard All-Equity ETF",
+                                            "primaryExchange": "TSX",
+                                        },
                                     },
                                 }
                             }
@@ -242,6 +246,7 @@ def test_maps_positions_and_cash(tmp_path: Path) -> None:
     assert account.cash == Money.of("500.00", Currency.CAD)
     veqt = account.holdings[0]
     assert veqt.symbol == "VEQT"
+    assert veqt.name == "Vanguard All-Equity ETF"
     assert veqt.exchange == "TSX"
     assert veqt.asset_class is AssetClass.ETF
     assert veqt.quantity == Decimal("20")

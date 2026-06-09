@@ -41,13 +41,13 @@ def render_markdown(report: ReportModel) -> str:
     lines += [
         "## Holdings",
         "",
-        "| Symbol | Class | Quantity | Market Value | Allocation |",
-        "| --- | --- | ---: | ---: | ---: |",
+        "| Symbol | Name | Class | Quantity | Market Value | Allocation |",
+        "| --- | --- | --- | ---: | ---: | ---: |",
     ]
     for holding in report.holdings:
         quantity = format_quantity(holding.quantity)
         lines.append(
-            f"| {holding.symbol} | {holding.asset_class.title()} | {quantity} "
+            f"| {holding.symbol} | {holding.name} | {holding.asset_class.title()} | {quantity} "
             f"| {holding.value.format()} | {_pct(holding.allocation)} |"
         )
     lines.append("")

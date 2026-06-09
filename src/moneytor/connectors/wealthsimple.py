@@ -105,7 +105,7 @@ query Positions($identityId: ID!, $currency: Currency!, $cursor: String) {
             accounts { id }
             bookValue { amount currency }
             totalValue { amount currency }
-            security { securityType stock { symbol primaryExchange } }
+            security { securityType stock { symbol name primaryExchange } }
           } }
         }
       }
@@ -340,6 +340,7 @@ class WealthsimpleConnector:
         symbol = stock.get("symbol") or security.get("id") or "UNKNOWN"
         return Holding(
             symbol=str(symbol),
+            name=str(stock.get("name") or ""),
             exchange=str(stock.get("primaryExchange") or ""),
             asset_class=_SECURITY_TYPES.get(str(security.get("securityType")), AssetClass.OTHER),
             quantity=to_decimal(node.get("quantity", 0), "position.quantity"),

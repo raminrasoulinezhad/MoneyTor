@@ -17,7 +17,12 @@ from .model import ReportModel, build_report
 
 __all__ = ["build_report", "render_pdf", "write_pdf"]
 
-_HEADERS = ("Symbol", "Class", "Quantity", "Market Value", "Allocation")
+_HEADERS = ("Symbol", "Name", "Class", "Quantity", "Market Value", "Allocation")
+
+
+def _latin1(text: str) -> str:
+    """Make ``text`` safe for fpdf2's core (latin-1) fonts."""
+    return text.encode("latin-1", "replace").decode("latin-1")
 
 
 def _line(pdf: FPDF, text: str, height: float = 6.0) -> None:
@@ -66,6 +71,7 @@ def render_pdf(report: ReportModel) -> bytes:
             quantity = format_quantity(holding.quantity)
             row = table.row()
             row.cell(holding.symbol)
+            row.cell(_latin1(holding.name))
             row.cell(holding.asset_class.title())
             row.cell(quantity)
             row.cell(holding.value.format())

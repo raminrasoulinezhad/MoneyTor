@@ -57,7 +57,7 @@ def test_markdown_contains_key_sections() -> None:
     # Currency formatting present.
     assert "CAD" in md
     # Table header row.
-    assert "| Symbol | Class | Quantity | Market Value | Allocation |" in md
+    assert "| Symbol | Name | Class | Quantity | Market Value | Allocation |" in md
 
 
 def test_markdown_is_deterministic() -> None:
