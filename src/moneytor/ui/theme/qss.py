@@ -73,6 +73,14 @@ def build_qss(t: ThemeTokens) -> str:
         spacing: {t.spacing}px;
     }}
 
+    /* Error banner */
+    #ErrorBanner {{
+        background: {t.negative};
+        border-bottom: 1px solid {t.border};
+    }}
+    #ErrorBannerText {{ color: white; font-weight: 600; }}
+    #ErrorBannerDismiss {{ background: rgba(0, 0, 0, 0.25); }}
+
     /* Holdings table */
     QTableWidget {{
         background: {t.surface};

@@ -12,6 +12,7 @@ from moneytor.connectors import MockConnector
 from moneytor.domain.enums import Currency, Institution
 from moneytor.domain.models import Person
 from moneytor.fx.provider import StaticFxProvider
+from moneytor.persistence import SnapshotCache
 
 from .main_window import MainWindow
 
@@ -38,12 +39,28 @@ def demo_people() -> tuple[Person, ...]:
 
 
 def run_app(argv: list[str] | None = None) -> int:
-    """Create the QApplication, show the cockpit, and run the event loop."""
+    """Create the QApplication, show the cockpit, and run the event loop.
+
+    Cold-starts from the snapshot cache when present (instant, offline), and
+    refreshes re-fetch and re-cache via the injected loader.
+    """
     app = QApplication.instance() or QApplication(argv or sys.argv)
+    currency = Currency.CAD
+    cache = SnapshotCache()
+
+    cached = cache.load()
+    people = cached.people if cached else demo_people()
+
+    def loader() -> tuple[Person, ...]:
+        fetched = demo_people()
+        cache.save(fetched, currency)
+        return fetched
+
     window = MainWindow(
-        people=demo_people(),
+        people=people,
         provider=demo_provider(),
-        display_currency=Currency.CAD,
+        display_currency=currency,
+        loader=loader,
     )
     window.show()
     return app.exec()

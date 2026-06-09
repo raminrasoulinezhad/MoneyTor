@@ -14,6 +14,7 @@ import pytest
 pytest.importorskip("pytestqt")
 
 from moneytor.connectors import load_accounts
+from moneytor.connectors.errors import AuthError
 from moneytor.domain import Currency, Person
 from moneytor.fx import StaticFxProvider
 from moneytor.ui.main_window import MainWindow
@@ -93,3 +94,50 @@ def test_fetch_worker_reports_failure(qtbot) -> None:
         worker.start()
     assert isinstance(blocker.args[0], RuntimeError)
     worker.wait()
+
+
+# --------------------------------------------------------------------------- #
+# Reload via worker + error banner (Phase 10)
+# --------------------------------------------------------------------------- #
+
+
+def test_reload_updates_data_and_timestamp(qtbot) -> None:
+    extra = Person(id="alex", name="Alex", accounts=load_accounts(FIXTURE))
+
+    def loader() -> tuple[Person, ...]:
+        return (*_people(), extra)
+
+    window = MainWindow(
+        people=_people(),
+        provider=PROVIDER,
+        display_currency=CAD,
+        loader=loader,
+        clock=lambda: "2026-06-08 09:00",
+    )
+    qtbot.addWidget(window)
+    assert window.dashboard.table.rowCount() == 3
+
+    window.reload_data()
+    qtbot.waitUntil(lambda: window.last_updated != "", timeout=2000)
+    assert window.last_updated == "Updated 2026-06-08 09:00"
+    assert window.banner.isHidden()
+
+
+def test_reload_failure_shows_error_banner(qtbot) -> None:
+    def loader() -> tuple[Person, ...]:
+        raise AuthError("token expired")
+
+    window = MainWindow(people=_people(), provider=PROVIDER, display_currency=CAD, loader=loader)
+    qtbot.addWidget(window)
+
+    window.reload_data()
+    qtbot.waitUntil(lambda: not window.banner.isHidden(), timeout=2000)
+    assert "token expired" in window.banner.message
+
+
+def test_error_banner_dismiss(qtbot) -> None:
+    window = _window(qtbot)
+    window.banner.show_message("oops")
+    assert not window.banner.isHidden()
+    window.banner.hide()
+    assert window.banner.isHidden()
