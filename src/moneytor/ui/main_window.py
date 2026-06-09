@@ -29,6 +29,7 @@ from moneytor.ui.theme import Theme, stylesheet_for, tokens_for
 from moneytor.ui.viewmodels import SidebarModel, view_model_for
 from moneytor.ui.views.dashboard import DashboardView
 from moneytor.ui.widgets.banner import ErrorBanner
+from moneytor.ui.widgets.kpi_panel import KpiPanel
 from moneytor.ui.widgets.sidebar import Sidebar
 from moneytor.ui.workers import FetchWorker
 
@@ -79,10 +80,22 @@ class MainWindow(QMainWindow):
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(0)
+
+        # Left column: KPI cards on top, then the family/account tree below.
+        left_column = QWidget()
+        left_column.setObjectName("LeftColumn")
+        left_column.setFixedWidth(300)
+        left_layout = QVBoxLayout(left_column)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(0)
+        self.kpi_panel = KpiPanel()
         self.sidebar = Sidebar()
         self.sidebar.selectionChanged.connect(self._on_selection_changed)
+        left_layout.addWidget(self.kpi_panel)
+        left_layout.addWidget(self.sidebar, stretch=1)
+
         self.dashboard = DashboardView()
-        body.addWidget(self.sidebar)
+        body.addWidget(left_column)
         body.addWidget(self.dashboard, stretch=1)
         outer.addLayout(body, stretch=1)
         self.setCentralWidget(central)
@@ -103,10 +116,11 @@ class MainWindow(QMainWindow):
         self.refresh()
 
     def refresh(self) -> None:
-        """Rebuild the dashboard view-model for the current selection."""
+        """Rebuild the view-model for the current selection (KPIs + dashboard)."""
         view_model = view_model_for(
             self._people, self._currency, self._provider, self._selected_ids
         )
+        self.kpi_panel.set_kpis(view_model.kpis)
         self.dashboard.set_view_model(view_model)
 
     def reload_data(self) -> None:

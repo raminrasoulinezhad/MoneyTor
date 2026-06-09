@@ -39,8 +39,8 @@ def _window(qtbot) -> MainWindow:
 
 def test_window_renders_kpis_and_table(qtbot) -> None:
     window = _window(qtbot)
-    assert len(window.dashboard.kpi_cards) == 3
-    assert "CAD" in window.dashboard.kpi_cards[0].value_text
+    assert len(window.kpi_panel.kpi_cards) == 3
+    assert "CAD" in window.kpi_panel.kpi_cards[0].value_text
     assert window.dashboard.table.rowCount() == 3  # SHOP, VFV, AAPL
 
 
