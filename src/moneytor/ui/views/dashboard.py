@@ -50,7 +50,9 @@ class DashboardView(QWidget):
     def set_view_model(self, view_model: DashboardViewModel) -> None:
         """Render the table rows and the chart for ``view_model``."""
         self._last_rows = view_model.rows
-        self._apply_filter()  # honours any active search text
+        # The table owns sorting/filtering and keeps the active search text, so
+        # it re-renders honouring it. The chart always reflects the full set.
+        self.table.set_rows(view_model.rows)
         self.chart_panel.set_allocation(view_model.rows, self._tokens)
 
     def focus_search(self) -> None:
@@ -59,18 +61,8 @@ class DashboardView(QWidget):
         self.search.selectAll()
 
     def _apply_filter(self) -> None:
-        """Show only rows whose symbol or name matches the search text."""
-        query = self.search.text().strip().lower()
-        if not query:
-            self.table.set_rows(self._last_rows)
-            return
-        self.table.set_rows(
-            tuple(
-                row
-                for row in self._last_rows
-                if query in row.symbol.lower() or query in row.name.lower()
-            )
-        )
+        """Filter the table by the search text (the table preserves ranks)."""
+        self.table.set_filter(self.search.text())
 
     def set_loading(self, loading: bool) -> None:
         """Toggle a simple loading state on the chart panel."""

@@ -103,40 +103,52 @@ def test_chart_panel_shows_summary_fallback_when_headless(qtbot) -> None:
 
 
 def test_table_sorts_market_value_numerically(qtbot) -> None:
-    from PySide6.QtCore import Qt
-
     window = _window(qtbot)
     table = window.dashboard.table
-    # Market Value column (5): sort ascending and confirm true numeric order
-    # (string sort would put "$1,200.50" before "$950.75").
-    table.sortItems(5, Qt.SortOrder.AscendingOrder)
+    # Market Value column (5) defaults to descending; one click toggles to
+    # ascending. Confirm true numeric order (a string sort would put
+    # "$1,200.50" before "$950.75").
+    table.horizontalHeader().sectionClicked.emit(5)
     values = [table.item(r, 5).text() for r in range(table.rowCount())]
     # AAPL 950.75 (USD) -> CAD is smallest; the largest is VFV 3100.
     amounts = [float(v.replace("$", "").replace(",", "").split()[0]) for v in values]
     assert amounts == sorted(amounts)
 
 
-def test_rank_gutter_reflects_active_sort(qtbot) -> None:
-    from PySide6.QtCore import Qt
+def _rank_of(table, symbol: str) -> int:
+    for r in range(table.rowCount()):
+        if table.item(r, 0).text() == symbol:
+            return int(table.verticalHeaderItem(r).text())
+    raise AssertionError(f"{symbol} not visible")
 
+
+def test_rank_gutter_reflects_active_sort(qtbot) -> None:
     window = _window(qtbot)
     table = window.dashboard.table
     assert not table.verticalHeader().isHidden()  # rank gutter shown
 
-    def rank_of(symbol: str) -> int:
-        for r in range(table.rowCount()):
-            if table.item(r, 0).text() == symbol:
-                # Vertical header is 1-based and tracks visual row order.
-                return int(table.model().headerData(r, Qt.Orientation.Vertical))
-        raise AssertionError(symbol)
+    # Default sort is Market Value descending: the largest holding ranks #1.
+    assert _rank_of(table, "VFV") == 1  # VFV 3100 is the largest in the fixture
 
-    # Sort by Market Value descending: the largest holding ranks #1.
-    table.sortItems(5, Qt.SortOrder.DescendingOrder)
-    assert rank_of("VFV") == 1  # VFV 3100 is the largest in the fixture
+    # Clicking the Market Value header toggles to ascending: ranks flip.
+    table.horizontalHeader().sectionClicked.emit(5)
+    assert _rank_of(table, "VFV") == table.rowCount()
 
-    # Re-sort ascending: ranks flip, so VFV now sits last.
-    table.sortItems(5, Qt.SortOrder.AscendingOrder)
-    assert rank_of("VFV") == table.rowCount()
+
+def test_rank_index_is_stable_under_search(qtbot) -> None:
+    window = _window(qtbot)
+    table = window.dashboard.table
+    # AAPL's rank in the full (value-desc) set, before filtering.
+    full_rank = _rank_of(table, "AAPL")
+    assert full_rank != 1  # AAPL is not the largest, so this is a real check
+
+    window.dashboard.search.setText("aapl")
+    assert table.rowCount() == 1  # only AAPL matches
+    # Its index is preserved from the full set rather than reset to 1.
+    assert _rank_of(table, "AAPL") == full_rank
+
+    window.dashboard.search.setText("")
+    assert _rank_of(table, "AAPL") == full_rank  # unchanged after clearing
 
 
 def test_chart_selector_switches_to_sectors(qtbot) -> None:
