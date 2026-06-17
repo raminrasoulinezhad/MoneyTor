@@ -233,9 +233,9 @@ def test_sector_carried_into_unified_holding() -> None:
     assert unified[0].sector == "Information Technology"
 
 
-def test_cash_and_gic_collapse_into_cash_sector() -> None:
-    # Cash and GICs both report as the synthetic "Cash" sector, overriding
-    # whatever (if anything) the broker supplied.
+def test_cash_and_gic_use_distinct_synthetic_sectors() -> None:
+    # Cash reports as "Cash"; GICs as the distinct "Cash-Equivalent" sector,
+    # both overriding whatever (if anything) the broker supplied.
     cash = replace(
         _holding("CASH:USD", "", USD, "100", "100"),
         asset_class=AssetClass.CASH,
@@ -247,7 +247,7 @@ def test_cash_and_gic_collapse_into_cash_sector() -> None:
     )
     unified = {u.symbol: u for u in merge_holdings((cash, gic), CAD, PROVIDER)}
     assert unified["CASH:USD"].sector == "Cash"
-    assert unified["GIC-2026"].sector == "Cash"
+    assert unified["GIC-2026"].sector == "Cash-Equivalent"
 
 
 @pytest.mark.parametrize("symbol", ["GOLD", "gold", "IAUM"])
