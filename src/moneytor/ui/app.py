@@ -176,7 +176,10 @@ def run_app(argv: list[str] | None = None) -> int:
 
     cached = cache.load()
     if cached is not None:
-        people: tuple[Person, ...] = cached.people
+        # Re-apply the sector overrides on cached loads too — the cache predates
+        # any edits to sectors.json, and brokers that omit sectors (Wealthsimple)
+        # would otherwise stay "Unknown" until the next live fetch.
+        people: tuple[Person, ...] = apply_sector_map(cached.people, sector_map)
     elif has_credentials:
         people = ()  # filled by the cold-start reload below
     else:

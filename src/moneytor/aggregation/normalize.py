@@ -16,6 +16,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+from moneytor.domain.enums import AssetClass
 from moneytor.domain.models import Account, Person
 
 # Suffixes that denote a listing venue (safe to strip), not a share class.
@@ -74,6 +75,31 @@ def normalize_sector(raw: str) -> str:
         return ""
     key = cleaned.lower().replace("-", "").replace(" ", "")
     return _SECTOR_ALIASES.get(key, cleaned)
+
+
+# Synthetic, non-GICS sectors used to group non-equity holdings in allocation
+# views. Cash and GICs are both cash-equivalents, so they share one bucket.
+CASH_SECTOR = "Cash"
+BULLION_SECTOR = "Bullion"
+
+# Tickers that represent physical gold/bullion rather than a GICS-classified
+# security. Add new bullion symbols here. Compared case-insensitively.
+BULLION_SYMBOLS: frozenset[str] = frozenset({"GOLD", "IAUM"})
+
+
+def classify_sector(symbol: str, asset_class: AssetClass, sector: str) -> str:
+    """Resolve a holding's display sector, applying fixed overrides.
+
+    Cash balances and GICs collapse into one ``"Cash"`` sector; known bullion
+    tickers into ``"Bullion"``. These overrides win over any broker- or
+    file-supplied ``sector`` because the asset's nature is fixed regardless of
+    how a broker happens to classify it. Any other holding keeps ``sector``.
+    """
+    if asset_class in (AssetClass.CASH, AssetClass.GIC):
+        return CASH_SECTOR
+    if symbol.strip().upper() in BULLION_SYMBOLS:
+        return BULLION_SECTOR
+    return sector
 
 
 def _strip_exchange_suffix(symbol: str) -> str:

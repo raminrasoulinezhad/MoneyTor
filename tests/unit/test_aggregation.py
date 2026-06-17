@@ -233,6 +233,30 @@ def test_sector_carried_into_unified_holding() -> None:
     assert unified[0].sector == "Information Technology"
 
 
+def test_cash_and_gic_collapse_into_cash_sector() -> None:
+    # Cash and GICs both report as the synthetic "Cash" sector, overriding
+    # whatever (if anything) the broker supplied.
+    cash = replace(
+        _holding("CASH:USD", "", USD, "100", "100"),
+        asset_class=AssetClass.CASH,
+    )
+    gic = replace(
+        _holding("GIC-2026", "", CAD, "1", "5000"),
+        asset_class=AssetClass.GIC,
+        sector="Financials",  # broker classification is ignored
+    )
+    unified = {u.symbol: u for u in merge_holdings((cash, gic), CAD, PROVIDER)}
+    assert unified["CASH:USD"].sector == "Cash"
+    assert unified["GIC-2026"].sector == "Cash"
+
+
+@pytest.mark.parametrize("symbol", ["GOLD", "gold", "IAUM"])
+def test_bullion_symbols_classified_as_bullion(symbol: str) -> None:
+    holding = replace(_holding(symbol, "", CAD, "1", "100"), sector="Materials")
+    unified = merge_holdings((holding,), CAD, PROVIDER)
+    assert unified[0].sector == "Bullion"
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
