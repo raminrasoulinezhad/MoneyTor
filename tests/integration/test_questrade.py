@@ -131,6 +131,40 @@ def test_cached_token_preferred_over_seed(tmp_path: Path) -> None:
     assert captured == ["cached-token"]
 
 
+def test_stale_cache_falls_back_to_seed(tmp_path: Path) -> None:
+    store = TokenStore(tmp_path / "tokens.json")
+    store.save("questrade", "ramin", "stale-cached-token")
+    captured: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth2/token":
+            token = dict(request.url.params)["refresh_token"]
+            captured.append(token)
+            if token == "stale-cached-token":
+                return httpx.Response(400, json={"error": "invalid_grant"})
+        return _handler(request)
+
+    connector = QuestradeConnector(
+        person_id="ramin",
+        seed_refresh_token="seed-token-1",
+        token_store=store,
+        client=_client(handler),
+    )
+    connector.authenticate()
+
+    # Stale cache tried first, then the seed; the rotated token overwrites cache.
+    assert captured == ["stale-cached-token", "seed-token-1"]
+    assert store.get("questrade", "ramin") == "rotated-token-2"
+
+
+def test_auth_400_with_only_seed_raises_auth_error(tmp_path: Path) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"error": "invalid_grant"})
+
+    with pytest.raises(AuthError):
+        _connector(tmp_path, handler).authenticate()
+
+
 def test_auth_401_raises_auth_error(tmp_path: Path) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(401, json={"message": "bad token"})

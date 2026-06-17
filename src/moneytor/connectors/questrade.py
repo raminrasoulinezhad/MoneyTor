@@ -101,9 +101,44 @@ class QuestradeConnector:
     # -- auth --------------------------------------------------------------- #
 
     def authenticate(self) -> None:
-        token = self._token_store.get(_INSTITUTION_KEY, self._person_id) or self._seed
-        if not token:
+        # Prefer the rotated cache token, then fall back to the .env seed.
+        # Refresh tokens are single-use, so a cached token can go stale (an
+        # interrupted run, or the user re-seeding .env after revoking it). When
+        # Questrade rejects it as a bad token, retry with the seed before giving
+        # up; a successful seed refresh overwrites the stale cache, self-healing.
+        cached = self._token_store.get(_INSTITUTION_KEY, self._person_id)
+        candidates = list(dict.fromkeys(t for t in (cached, self._seed) if t))
+        if not candidates:
             raise AuthError(f"No Questrade refresh token for {self._person_id!r}.")
+
+        last_error: AuthError | None = None
+        for token in candidates:
+            try:
+                data = self._refresh(token)
+            except AuthError as exc:
+                last_error = exc
+                continue
+            new_token = data.get("refresh_token")
+            if not new_token or "access_token" not in data or "api_server" not in data:
+                raise AuthError("Questrade auth response missing expected fields.")
+            self._token_store.save(_INSTITUTION_KEY, self._person_id, new_token)
+            self._session = _Session(
+                access_token=data["access_token"],
+                api_server=data["api_server"].rstrip("/") + "/",
+            )
+            return
+        assert last_error is not None  # loop ran at least once; only AuthError swallowed
+        raise last_error
+
+    def _refresh(self, token: str) -> Any:
+        """Exchange one refresh token for a session payload.
+
+        A 400/401 from the OAuth endpoint means the *token* is bad (Questrade's
+        ``invalid_grant``), so it surfaces as :class:`AuthError` to let
+        :meth:`authenticate` try the next candidate. Connectivity failures and
+        rate limits propagate unchanged — retrying them with another token would
+        needlessly burn a still-valid seed.
+        """
         try:
             response = self._client.get(
                 f"{self._login_host}/oauth2/token",
@@ -111,16 +146,10 @@ class QuestradeConnector:
             )
         except httpx.HTTPError as exc:
             raise FetchError(f"Questrade auth request failed: {exc}.") from exc
+        if response.status_code in (httpx.codes.BAD_REQUEST, httpx.codes.UNAUTHORIZED):
+            raise AuthError(f"Questrade rejected the refresh token (HTTP {response.status_code}).")
         self._raise_for_status(response)
-        data = response.json()
-        new_token = data.get("refresh_token")
-        if not new_token or "access_token" not in data or "api_server" not in data:
-            raise AuthError("Questrade auth response missing expected fields.")
-        self._token_store.save(_INSTITUTION_KEY, self._person_id, new_token)
-        self._session = _Session(
-            access_token=data["access_token"],
-            api_server=data["api_server"].rstrip("/") + "/",
-        )
+        return response.json()
 
     # -- fetch -------------------------------------------------------------- #
 
