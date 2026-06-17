@@ -12,7 +12,7 @@ from moneytor.domain.money import Money
 from moneytor.fx.convert import convert
 from moneytor.fx.provider import FxProvider
 
-from .normalize import AssetMap
+from .normalize import AssetMap, classify_sector
 
 
 def merge_holdings(
@@ -39,15 +39,17 @@ def merge_holdings(
         total_value = Money.zero(target_currency)
         for holding in members:
             total_value += convert(holding.market_value, target_currency, provider)
+        asset_class = members[0].asset_class
+        raw_sector = next((m.sector for m in members if m.sector), "")
         unified.append(
             UnifiedHolding(
                 symbol=symbol,
-                asset_class=members[0].asset_class,
+                asset_class=asset_class,
                 total_quantity=total_quantity,
                 total_market_value=total_value.quantize(),
                 sources=tuple(members),
                 name=next((m.name for m in members if m.name), ""),
-                sector=next((m.sector for m in members if m.sector), ""),
+                sector=classify_sector(symbol, asset_class, raw_sector),
                 high_52w=next((m.high_52w for m in members if m.high_52w is not None), None),
             )
         )
