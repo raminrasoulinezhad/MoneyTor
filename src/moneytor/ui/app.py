@@ -192,7 +192,8 @@ def run_app(argv: list[str] | None = None) -> int:
         loader=loader,
     )
     otp_provider.parent_widget = window  # center the 2FA dialog on the window
-    window.show()
+    # Open filling the screen; the resize() in MainWindow is the restored-down size.
+    window.showMaximized()
 
     # With credentials but no cache, fetch live immediately (off-thread, with
     # the loading state and error banner) so the user sees real data on launch.
