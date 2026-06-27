@@ -107,3 +107,35 @@ def test_high_52w_pct_computed_in_native_currency() -> None:
     )
     assert vm2.rows[0].high_52w_pct is None
     assert vm2.rows[0].high_52w_text == "—"
+
+
+def test_unit_price_in_native_currency_with_sub_cent_precision() -> None:
+    from moneytor.domain import Account, AccountType, AssetClass, Holding, Institution, Money
+
+    # 3 shares worth $100 USD total -> $33.3333.../share. The display currency is
+    # CAD, but the unit price must stay in the security's native USD and keep
+    # more than cent precision.
+    holding = Holding(
+        symbol="AAPL",
+        exchange="NASDAQ",
+        asset_class=AssetClass.EQUITY,
+        quantity=Decimal("3"),
+        book_value=Money.of("90", USD),
+        market_value=Money.of("100", USD),
+    )
+    account = Account(
+        id="a",
+        person_id="p",
+        institution=Institution.QUESTRADE,
+        account_type=AccountType.MARGIN,
+        cash=Money.zero(USD),
+        holdings=(holding,),
+    )
+    people = (Person(id="p", name="P", accounts=(account,)),)
+    vm = build_dashboard_view_model(build_snapshot(people, CAD, PROVIDER), PROVIDER)
+    row = next(r for r in vm.rows if r.symbol == "AAPL")
+    assert row.unit_price_native is not None
+    assert row.unit_price_native.currency is USD  # native, not the CAD display currency
+    # Unrounded Decimal kept on the model; formatted to 4 places for the table.
+    assert row.unit_price_native.amount == Decimal("100") / Decimal("3")
+    assert row.unit_price_text == "$33.3333 USD"

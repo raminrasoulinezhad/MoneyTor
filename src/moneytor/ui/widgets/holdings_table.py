@@ -39,6 +39,7 @@ _HEADERS = (
     "Market Value",
     "Allocation",
     "52WHG",
+    "Unit Price",
 )
 _VALUE_COLUMN = 5  # default sort column (descending)
 # Text columns default to ascending when first sorted; numeric ones default to
@@ -58,6 +59,7 @@ _SORT_KEYS: dict[int, Callable[[HoldingRow], object]] = {
     5: lambda r: r.value.amount,
     6: lambda r: r.allocation,
     7: lambda r: r.high_52w_pct if r.high_52w_pct is not None else _NO_VALUE,
+    8: lambda r: r.unit_price_native.amount if r.unit_price_native is not None else _NO_VALUE,
 }
 
 
@@ -159,6 +161,7 @@ class HoldingsTable(QTableWidget):
             self._set(r, 5, row.value.format(), right)
             self._set(r, 6, row.allocation_pct, right)
             self._set(r, 7, row.high_52w_text, right)
+            self._set(r, 8, row.unit_price_text, right)
             rank_item = QTableWidgetItem(str(rank))
             rank_item.setTextAlignment(right)
             self.setVerticalHeaderItem(r, rank_item)
