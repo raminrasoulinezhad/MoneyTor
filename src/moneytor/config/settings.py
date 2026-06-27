@@ -66,6 +66,7 @@ class Settings:
     display_currency: Currency = Currency.CAD
     fx_provider: str = "static"
     fx_api_key: Secret | None = None
+    app_password: Secret | None = None
     people: tuple[PersonCredentials, ...] = field(default_factory=tuple)
 
     def secret_values(self) -> list[str]:
@@ -73,6 +74,8 @@ class Settings:
         out: list[str] = []
         if self.fx_api_key is not None:
             out.append(self.fx_api_key.reveal())
+        if self.app_password is not None:
+            out.append(self.app_password.reveal())
         for person in self.people:
             out.extend(person.secret_values())
         return [s for s in out if s]
@@ -179,6 +182,7 @@ def load_settings(
 
     fx_provider = env.get("MONEYTOR_FX_PROVIDER", "static")
     fx_api_key_raw = env.get("MONEYTOR_FX_API_KEY")
+    app_password_raw = env.get("MONEYTOR_APP_PASSWORD")
 
     person_fields = _parse_person_fields(env)
     people = tuple(_build_person(pid, fields) for pid, fields in sorted(person_fields.items()))
@@ -188,6 +192,7 @@ def load_settings(
         display_currency=display_currency,
         fx_provider=fx_provider,
         fx_api_key=Secret(fx_api_key_raw) if fx_api_key_raw else None,
+        app_password=Secret(app_password_raw) if app_password_raw else None,
         people=people,
     )
     logging.getLogger(__name__).debug(

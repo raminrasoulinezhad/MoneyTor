@@ -39,6 +39,15 @@ def test_defaults_when_environment_is_empty() -> None:
     assert settings.display_currency is Currency.CAD
     assert settings.fx_provider == "static"
     assert settings.people == ()
+    assert settings.app_password is None  # ungated when unset
+
+
+def test_app_password_loaded_and_redacted() -> None:
+    settings = load_settings(env_file=None, environ={"MONEYTOR_APP_PASSWORD": "5205"})
+    assert settings.app_password is not None
+    assert settings.app_password.reveal() == "5205"
+    # Included in the redaction set so it never leaks into logs.
+    assert "5205" in settings.secret_values()
 
 
 def test_loads_full_person_credentials() -> None:
