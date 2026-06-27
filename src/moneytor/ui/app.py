@@ -28,8 +28,13 @@ from moneytor.persistence.token_store import TokenStore
 
 from .main_window import MainWindow
 from .otp import GuiOtpProvider
+from .widgets.login_dialog import require_password
 
 _LOG = logging.getLogger(__name__)
+
+# Fixed app password gate. TODO: move to .env/Settings (see CLAUDE.md "Security
+# First") rather than shipping it in source.
+_APP_PASSWORD = "5205"
 
 # Fallback USD->CAD used before the first fetch / when the rate API is offline.
 _FALLBACK_USD_CAD = Decimal("1.36")
@@ -149,6 +154,10 @@ def run_app(argv: list[str] | None = None) -> int:
     app stays in demo mode with the bundled fixture.
     """
     app = QApplication.instance() or QApplication(argv or sys.argv)
+    # Gate the app behind a password before loading any data or building the UI.
+    if not require_password(_APP_PASSWORD):
+        _LOG.info("Login cancelled; exiting.")
+        return 0
     settings = _load_settings_safely()
     # Configure logging with secret redaction before anything can log.
     setup_logging(settings.log_level, settings.secret_values())
