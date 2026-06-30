@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QToolBar,
     QVBoxLayout,
     QWidget,
@@ -75,6 +76,8 @@ class MainWindow(QMainWindow):
         self._clock = clock or _default_clock
         self._worker: FetchWorker | None = None
         self._lock_overlay: LockScreen | None = None
+        # Set the first time the window is locked; enables the Log out button.
+        self._expected_password: str | None = None
 
         self._build_toolbar()
 
@@ -127,7 +130,10 @@ class MainWindow(QMainWindow):
 
         Returns the overlay so the caller can connect to its ``unlocked`` /
         ``cancelled`` signals (e.g. to defer loading data until after unlock).
+        Remembers the password so the user can re-lock later via Log out.
         """
+        self._expected_password = expected_password
+        self._logout_button.setVisible(True)
         overlay = LockScreen(expected_password, self)
         overlay.setGeometry(self.rect())
         overlay.unlocked.connect(self._dismiss_lock)
@@ -135,6 +141,18 @@ class MainWindow(QMainWindow):
         overlay.raise_()
         self._lock_overlay = overlay
         return overlay
+
+    def log_out(self) -> None:
+        """Re-lock the window, returning to the password gate.
+
+        No-op when no password is configured (the gate was never shown). The
+        opaque overlay hides the loaded portfolio until the password is
+        re-entered; Quit on the gate closes the app, as on launch.
+        """
+        if self._expected_password is None or self._lock_overlay is not None:
+            return
+        overlay = self.lock(self._expected_password)
+        overlay.cancelled.connect(self.close)
 
     def _dismiss_lock(self) -> None:
         if self._lock_overlay is not None:
@@ -228,6 +246,18 @@ class MainWindow(QMainWindow):
         self._updated_label = QLabel("")
         self._updated_label.setObjectName("CardSubtitle")
         toolbar.addWidget(self._updated_label)
+
+        # Push the Log out button to the far right of the toolbar.
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        toolbar.addWidget(spacer)
+
+        # Only meaningful when a password gate is configured; revealed by lock().
+        self._logout_button = QPushButton("Log out")
+        self._logout_button.clicked.connect(self.log_out)
+        self._logout_button.setVisible(False)
+        toolbar.addWidget(self._logout_button)
+
         self.addToolBar(toolbar)
 
     def _on_export(self) -> None:

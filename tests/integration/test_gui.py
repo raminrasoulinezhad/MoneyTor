@@ -76,6 +76,30 @@ def test_lock_overlay_covers_window_and_unlocks(qtbot) -> None:
     assert window._lock_overlay is None  # dismissed
 
 
+def test_log_out_relocks_after_unlock(qtbot) -> None:
+    window = _window(qtbot)
+    window.show()
+
+    # No password configured yet: Log out is hidden and a no-op.
+    assert not window._logout_button.isVisible()
+    window.log_out()
+    assert window._lock_overlay is None
+
+    # Lock, then unlock: the cockpit shows and Log out becomes available.
+    overlay = window.lock("hunter2")
+    overlay._input.setText("hunter2")
+    overlay._attempt()
+    assert window._lock_overlay is None
+    assert window._logout_button.isVisible()
+
+    # Log out returns to the password gate; unlocking again dismisses it.
+    window.log_out()
+    assert window._lock_overlay is not None
+    window._lock_overlay._input.setText("hunter2")
+    window._lock_overlay._attempt()
+    assert window._lock_overlay is None
+
+
 def test_theme_toggle_swaps_stylesheet(qtbot) -> None:
     window = _window(qtbot)
     assert window.theme is Theme.DARK
