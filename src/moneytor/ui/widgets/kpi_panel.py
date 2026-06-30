@@ -8,9 +8,11 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import replace
 
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
+from moneytor.formatting import PRIVATE_MASK
 from moneytor.ui.viewmodels import KpiModel
 from moneytor.ui.widgets.kpi_card import KpiCard
 
@@ -25,11 +27,24 @@ class KpiPanel(QWidget):
         self._layout.setContentsMargins(16, 16, 16, 8)
         self._layout.setSpacing(12)
         self._cards: list[KpiCard] = []
+        self._kpis: tuple[KpiModel, ...] = ()
+        self._private = False
 
     def set_kpis(self, kpis: Sequence[KpiModel]) -> None:
-        """Render ``kpis``, reusing existing cards when the count is unchanged."""
-        if len(self._cards) == len(kpis):
-            for card, model in zip(self._cards, kpis, strict=True):
+        """Store ``kpis`` and render them (masking sensitive cards if private)."""
+        self._kpis = tuple(kpis)
+        self._render()
+
+    def set_private(self, private: bool) -> None:
+        """Mask (or reveal) the monetary value on sensitive cards in place."""
+        self._private = private
+        self._render()
+
+    def _render(self) -> None:
+        """Render the stored KPIs, reusing cards when the count is unchanged."""
+        models = [self._display(model) for model in self._kpis]
+        if len(self._cards) == len(models):
+            for card, model in zip(self._cards, models, strict=True):
                 card.update_model(model)
             return
         while self._layout.count():
@@ -38,10 +53,16 @@ class KpiPanel(QWidget):
             if widget is not None:
                 widget.deleteLater()
         self._cards = []
-        for model in kpis:
+        for model in models:
             card = KpiCard(model)
             self._cards.append(card)
             self._layout.addWidget(card)
+
+    def _display(self, model: KpiModel) -> KpiModel:
+        """The model as shown: a masked value for sensitive cards in private mode."""
+        if self._private and model.sensitive:
+            return replace(model, value=PRIVATE_MASK)
+        return model
 
     @property
     def kpi_cards(self) -> list[KpiCard]:

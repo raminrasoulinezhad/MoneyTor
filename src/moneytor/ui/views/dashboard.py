@@ -72,6 +72,10 @@ class DashboardView(QWidget):
         for chart in self._charts:
             chart.set_allocation(view_model.rows, self._tokens)
 
+    def set_private(self, private: bool) -> None:
+        """Mask (or reveal) per-holding share counts and values in the table."""
+        self.table.set_private(private)
+
     def focus_search(self) -> None:
         """Focus and select the search box (wired to Ctrl+F)."""
         self.search.setFocus()

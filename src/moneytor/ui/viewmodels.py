@@ -100,6 +100,8 @@ class KpiModel:
     value: str
     subtitle: str = ""
     tone: str = "neutral"  # neutral | positive | negative
+    # True for cards carrying an absolute monetary figure (masked in private mode).
+    sensitive: bool = False
 
 
 @dataclass(frozen=True)
@@ -212,6 +214,7 @@ def build_dashboard_view_model(
             "Total Portfolio Value",
             total.format(with_currency=False),
             f"in {currency.value}",
+            sensitive=True,
         ),
         # Rough estimated yearly dividend income; subtitle shows the implied
         # portfolio-wide yield. Big number stays currency-free like the total.
@@ -219,18 +222,21 @@ def build_dashboard_view_model(
             "Est. Annual Dividends",
             dividends.format(with_currency=False),
             f"≈ {portfolio_yield:.1f}% yield · in {currency.value}",
+            sensitive=True,
         ),
         # Rough estimated yearly GIC interest (rate parsed from each GIC's name).
         KpiModel(
             "Est. GIC Interest",
             gic_interest.format(with_currency=False),
             f"in {currency.value}",
+            sensitive=True,
         ),
         # Combined passive income: dividends + GIC interest.
         KpiModel(
             "Est. Annual Income",
             total_income.format(with_currency=False),
             "dividends + GIC interest",
+            sensitive=True,
         ),
         KpiModel("Holdings", str(len(rows)), f"across {account_count} accounts"),
         KpiModel(

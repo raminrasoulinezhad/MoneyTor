@@ -242,6 +242,86 @@ def test_chart_panel_empty_selection_message(qtbot) -> None:
     assert "No holdings" in window.dashboard.left_chart._body.text()
 
 
+# --------------------------------------------------------------------------- #
+# Private mode
+# --------------------------------------------------------------------------- #
+
+_MASK = "••••••"
+# KPI card order: Total Value, Dividends, GIC Interest, Income, Holdings, Top.
+_SENSITIVE_KPIS = (0, 1, 2, 3)
+_QTY_COL, _VALUE_COL = 4, 5
+
+
+def test_private_mode_masks_sensitive_values(qtbot) -> None:
+    window = _window(qtbot)
+    cards = window.kpi_panel.kpi_cards
+    table = window.dashboard.table
+    # Real values before private mode.
+    assert cards[0].value_text != _MASK
+    assert table.item(0, _VALUE_COL).text() != _MASK
+
+    window.set_private(True)
+
+    # Total value + dividend/GIC/income KPIs are masked; count/top are not.
+    for i in _SENSITIVE_KPIS:
+        assert cards[i].value_text == _MASK
+    assert cards[4].value_text != _MASK  # Holdings count stays visible
+    assert cards[5].value_text != _MASK  # Top Position symbol stays visible
+    # Per-holding share count and market value are masked; symbol/allocation not.
+    for r in range(table.rowCount()):
+        assert table.item(r, _QTY_COL).text() == _MASK
+        assert table.item(r, _VALUE_COL).text() == _MASK
+        assert table.item(r, 0).text() != _MASK  # symbol
+        assert table.item(r, 6).text() != _MASK  # allocation %
+
+
+def test_private_mode_persists_across_refresh(qtbot) -> None:
+    window = _window(qtbot)
+    window.set_private(True)
+    # A re-render (e.g. after a refresh or filter) keeps values masked.
+    window.refresh()
+    assert window.kpi_panel.kpi_cards[0].value_text == _MASK
+    assert window.dashboard.table.item(0, _VALUE_COL).text() == _MASK
+
+
+def test_exit_private_mode_requires_password(qtbot, monkeypatch) -> None:
+    from moneytor.ui import main_window as mw
+
+    window = _window(qtbot)
+    # Configure the gate password (as the launch lock would).
+    window.lock("hunter2")
+    window._dismiss_lock()
+    window.set_private(True)
+    # The wrong-password warning is modal; stub it so the test never blocks.
+    monkeypatch.setattr(mw.QMessageBox, "warning", lambda *a, **k: None)
+
+    # Wrong password: stays private.
+    monkeypatch.setattr(mw.QInputDialog, "getText", lambda *a, **k: ("nope", True))
+    window._on_private_clicked()
+    assert window.private_mode is True
+    assert window._private_button.isChecked()
+
+    # Cancelled dialog: stays private.
+    monkeypatch.setattr(mw.QInputDialog, "getText", lambda *a, **k: ("", False))
+    window._on_private_clicked()
+    assert window.private_mode is True
+
+    # Correct password: reveals.
+    monkeypatch.setattr(mw.QInputDialog, "getText", lambda *a, **k: ("hunter2", True))
+    window._on_private_clicked()
+    assert window.private_mode is False
+    assert window.kpi_panel.kpi_cards[0].value_text != _MASK
+
+
+def test_enter_private_mode_needs_no_password(qtbot) -> None:
+    # Turning private mode ON is always free, even with a gate configured.
+    window = _window(qtbot)
+    window.lock("hunter2")
+    window._dismiss_lock()
+    window._on_private_clicked()
+    assert window.private_mode is True
+
+
 def test_fetch_worker_reports_success(qtbot) -> None:
     worker = FetchWorker(task=lambda: "done")
     with qtbot.waitSignal(worker.succeeded, timeout=2000) as blocker:

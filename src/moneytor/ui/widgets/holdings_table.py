@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from moneytor.formatting import format_asset_class, format_quantity
+from moneytor.formatting import PRIVATE_MASK, format_asset_class, format_quantity
 from moneytor.ui.viewmodels import HoldingRow
 
 _HEADERS = (
@@ -84,6 +84,7 @@ class HoldingsTable(QTableWidget):
 
         self._rows: tuple[HoldingRow, ...] = ()
         self._query: str = ""
+        self._private = False
         self._sort_col: int = _VALUE_COLUMN
         self._sort_order: Qt.SortOrder = Qt.SortOrder.DescendingOrder
 
@@ -117,6 +118,11 @@ class HoldingsTable(QTableWidget):
     def set_filter(self, query: str) -> None:
         """Show only rows matching ``query`` (by symbol or name); ranks unchanged."""
         self._query = query.strip().lower()
+        self._render()
+
+    def set_private(self, private: bool) -> None:
+        """Mask (or reveal) each holding's share count and market value."""
+        self._private = private
         self._render()
 
     # ------------------------------------------------------------- internals --- #
@@ -162,8 +168,9 @@ class HoldingsTable(QTableWidget):
             self._set(r, 1, row.name)
             self._set(r, 2, row.sector or "—")
             self._set(r, 3, format_asset_class(row.asset_class))
-            self._set(r, 4, format_quantity(row.quantity), right)
-            self._set(r, 5, row.value.format(), right)
+            # Per-holding share count and market value are hidden in private mode.
+            self._set(r, 4, PRIVATE_MASK if self._private else format_quantity(row.quantity), right)
+            self._set(r, 5, PRIVATE_MASK if self._private else row.value.format(), right)
             self._set(r, 6, row.allocation_pct, right)
             self._set(r, 7, row.high_52w_text, right)
             self._set(r, 8, row.unit_price_text, right)

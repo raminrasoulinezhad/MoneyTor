@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+# Placeholder shown in place of sensitive monetary values when private mode is on.
+PRIVATE_MASK = "••••••"
+
 
 def format_quantity(quantity: Decimal) -> str:
     """Format a share quantity with thousands separators, trimming only

@@ -15,7 +15,9 @@ from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -78,6 +80,7 @@ class MainWindow(QMainWindow):
         self._lock_overlay: LockScreen | None = None
         # Set the first time the window is locked; enables the Log out button.
         self._expected_password: str | None = None
+        self._private = False
 
         self._build_toolbar()
 
@@ -153,6 +156,23 @@ class MainWindow(QMainWindow):
             return
         overlay = self.lock(self._expected_password)
         overlay.cancelled.connect(self.close)
+
+    def set_private(self, private: bool) -> None:
+        """Hide (or reveal) absolute monetary values across the dashboard.
+
+        Masks the total portfolio value, the dividend/GIC-interest/income KPIs,
+        and each holding's share count and market value. The state persists
+        across refreshes (the widgets re-apply it on every render).
+        """
+        self._private = private
+        self.kpi_panel.set_private(private)
+        self.dashboard.set_private(private)
+        self._private_button.setChecked(private)
+        self._private_button.setText("Reveal values" if private else "Private mode")
+
+    @property
+    def private_mode(self) -> bool:
+        return self._private
 
     def _dismiss_lock(self) -> None:
         if self._lock_overlay is not None:
@@ -247,10 +267,16 @@ class MainWindow(QMainWindow):
         self._updated_label.setObjectName("CardSubtitle")
         toolbar.addWidget(self._updated_label)
 
-        # Push the Log out button to the far right of the toolbar.
+        # Push the Private mode / Log out buttons to the far right of the toolbar.
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         toolbar.addWidget(spacer)
+
+        # Hides absolute monetary values; revealing them requires the password.
+        self._private_button = QPushButton("Private mode")
+        self._private_button.setCheckable(True)
+        self._private_button.clicked.connect(self._on_private_clicked)
+        toolbar.addWidget(self._private_button)
 
         # Only meaningful when a password gate is configured; revealed by lock().
         self._logout_button = QPushButton("Log out")
@@ -277,6 +303,35 @@ class MainWindow(QMainWindow):
         # Empty selection means "show everything".
         self._selected_ids = account_ids or None
         self.refresh()
+
+    def _on_private_clicked(self) -> None:
+        # Enabling private mode is free; revealing values requires the password.
+        if not self._private:
+            self.set_private(True)
+            return
+        if self._verify_reveal_password():
+            self.set_private(False)
+        else:
+            # The checkable button toggled itself on click; keep it pressed since
+            # we are still private.
+            self._private_button.setChecked(True)
+
+    def _verify_reveal_password(self) -> bool:
+        """Prompt for the password; True if it matches (or none is configured)."""
+        if self._expected_password is None:
+            return True
+        entered, accepted = QInputDialog.getText(
+            self,
+            "Exit private mode",
+            "Enter your password to reveal values:",
+            QLineEdit.EchoMode.Password,
+        )
+        if not accepted:
+            return False
+        if entered == self._expected_password:
+            return True
+        QMessageBox.warning(self, "Private mode", "Incorrect password.")
+        return False
 
     def _on_progress(self, done: int, total: int, label: str) -> None:
         self.progress.set_progress(done, total, label)
