@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from moneytor import __version__
 from moneytor.aggregation import build_snapshot
 from moneytor.connectors.errors import ConnectorError
 from moneytor.domain.enums import Currency
@@ -58,7 +59,7 @@ class MainWindow(QMainWindow):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("MoneyTor")
+        self.setWindowTitle(f"MoneyTor v{__version__}")
         # Wide enough for the full 8-column holdings table (plus the 300px left
         # column) with no horizontal scroll, and tall enough for the chart plus
         # the top ~6 holdings on first launch.
