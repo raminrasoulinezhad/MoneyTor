@@ -33,6 +33,7 @@ from moneytor.persistence.token_store import TokenStore
 
 from .main_window import MainWindow
 from .otp import GuiOtpProvider
+from .workers import ProgressFn
 
 _LOG = logging.getLogger(__name__)
 
@@ -112,28 +113,43 @@ def live_people(
     settings: Settings,
     token_store: TokenStore,
     otp_provider: OtpProvider | None = None,
+    report: ProgressFn | None = None,
 ) -> tuple[Person, ...]:
     """Authenticate and fetch every configured person's accounts.
 
     Connector failures (auth/rate-limit/transport) propagate as ``ConnectorError``
     so the UI surfaces them via the error banner instead of crashing. Wealthsimple
     2FA is satisfied by ``otp_provider`` (a GUI prompt in the app).
+
+    ``report(done, total, label)`` is called before each person/institution
+    fetch (and once more on completion) so the UI can drive a loading bar. Every
+    connector is built up front so ``total`` is known before the first network
+    call.
     """
-    people: list[Person] = []
-    for creds in settings.people:
-        accounts: list[Account] = []
-        for connector in _connectors_for(creds, token_store, otp_provider):
-            connector.authenticate()
-            accounts.extend(connector.fetch_accounts())
-        if accounts:
-            people.append(
-                Person(
-                    id=creds.person_id,
-                    name=creds.person_id.capitalize(),
-                    accounts=tuple(accounts),
-                )
-            )
-    return tuple(people)
+    # Flatten to (person, connector) jobs up front so the progress total is the
+    # full count of fetches before any I/O begins.
+    jobs = [
+        (creds, connector)
+        for creds in settings.people
+        for connector in _connectors_for(creds, token_store, otp_provider)
+    ]
+    total = len(jobs)
+
+    accounts_by_person: dict[str, list[Account]] = {}
+    for done, (creds, connector) in enumerate(jobs):
+        if report is not None:
+            institution = connector.institution.value.capitalize()
+            report(done, total, f"Fetching {creds.person_id.capitalize()} — {institution}")
+        connector.authenticate()
+        accounts_by_person.setdefault(creds.person_id, []).extend(connector.fetch_accounts())
+    if report is not None:
+        report(total, total, "Finalizing")
+
+    return tuple(
+        Person(id=person_id, name=person_id.capitalize(), accounts=tuple(accounts))
+        for person_id, accounts in accounts_by_person.items()
+        if accounts
+    )
 
 
 def _load_settings_safely() -> Settings:
@@ -169,12 +185,16 @@ def run_app(argv: list[str] | None = None) -> int:
     provider = SnapshotFxProvider(_FALLBACK_USD_CAD)
     sector_map = _load_sector_map()
 
-    def loader() -> tuple[Person, ...]:
+    def loader(report: ProgressFn | None = None) -> tuple[Person, ...]:
         provider.refresh()  # off the UI thread, alongside the data fetch
         if has_credentials:
-            fetched = live_people(settings, token_store, otp_provider)
+            fetched = live_people(settings, token_store, otp_provider, report=report)
         else:
+            if report is not None:
+                report(0, 1, "Loading demo portfolio")
             fetched = demo_people()
+            if report is not None:
+                report(1, 1, "Loading demo portfolio")
         fetched = apply_sector_map(fetched, sector_map)
         cache.save(fetched, currency)
         return fetched

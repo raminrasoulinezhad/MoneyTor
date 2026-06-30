@@ -109,6 +109,18 @@ def build_qss(t: ThemeTokens) -> str:
     #ErrorBannerText {{ color: white; font-weight: 600; }}
     #ErrorBannerDismiss {{ background: rgba(0, 0, 0, 0.25); }}
 
+    /* Fetch progress bar (shown only while refreshing) */
+    #FetchProgress {{
+        background: {t.surface_alt};
+        border: none;
+        border-bottom: 1px solid {t.border};
+        color: {t.text};
+        font-size: {t.font_size_label}px;
+        font-weight: 600;
+        text-align: center;
+    }}
+    #FetchProgress::chunk {{ background: {t.accent}; }}
+
     /* Holdings table */
     QTableWidget {{
         background: {t.surface};

@@ -18,10 +18,15 @@ import pytest
 
 pytest.importorskip("pytestqt")
 
+from moneytor.config.secret import Secret
+from moneytor.config.settings import PersonCredentials, Settings
 from moneytor.connectors import load_accounts
 from moneytor.connectors.errors import AuthError
 from moneytor.domain import Currency, Person
+from moneytor.domain.enums import Institution
 from moneytor.fx import StaticFxProvider
+from moneytor.persistence.token_store import TokenStore
+from moneytor.ui import app as app_module
 from moneytor.ui.main_window import MainWindow
 from moneytor.ui.theme import Theme
 from moneytor.ui.workers import FetchWorker
@@ -221,6 +226,81 @@ def test_fetch_worker_reports_failure(qtbot) -> None:
     worker.wait()
 
 
+def test_fetch_worker_passes_progress_reporter(qtbot) -> None:
+    # A task that accepts one positional arg is handed a reporter; each call is
+    # relayed through the worker's progress signal (queued to this thread).
+    def task(report) -> str:
+        report(0, 2, "first")
+        report(2, 2, "done")
+        return "ok"
+
+    updates: list[tuple[int, int, str]] = []
+    worker = FetchWorker(task=task)
+    worker.progress.connect(lambda d, t, label: updates.append((d, t, label)))
+    with qtbot.waitSignal(worker.succeeded, timeout=2000):
+        worker.start()
+    worker.wait()
+    assert updates == [(0, 2, "first"), (2, 2, "done")]
+
+
+def test_fetch_worker_handles_zero_arg_task(qtbot) -> None:
+    # Zero-arg tasks (e.g. the OTP provider) must still be called with no args.
+    worker = FetchWorker(task=lambda: "no-args")
+    with qtbot.waitSignal(worker.succeeded, timeout=2000) as blocker:
+        worker.start()
+    assert blocker.args == ["no-args"]
+    worker.wait()
+
+
+class _FakeConnector:
+    """Minimal Connector for exercising live_people's progress reporting."""
+
+    def __init__(self, institution: Institution, accounts) -> None:
+        self._institution = institution
+        self._accounts = tuple(accounts)
+
+    @property
+    def institution(self) -> Institution:
+        return self._institution
+
+    def authenticate(self) -> None:
+        return None
+
+    def fetch_accounts(self):
+        return self._accounts
+
+
+def test_live_people_reports_progress_per_source(monkeypatch) -> None:
+    accounts = load_accounts(FIXTURE)
+    settings = Settings(
+        people=(
+            PersonCredentials(
+                person_id="ramin", wealthsimple_email="r@x.io", wealthsimple_password=Secret("pw")
+            ),
+            PersonCredentials(person_id="alex", questrade_refresh_token=Secret("tok")),
+        )
+    )
+
+    def fake_connectors_for(creds, token_store, otp_provider=None):
+        institution = (
+            Institution.WEALTHSIMPLE if creds.person_id == "ramin" else Institution.QUESTRADE
+        )
+        return [_FakeConnector(institution, accounts)]
+
+    monkeypatch.setattr(app_module, "_connectors_for", fake_connectors_for)
+
+    updates: list[tuple[int, int, str]] = []
+    people = app_module.live_people(
+        settings, TokenStore(), report=lambda d, t, label: updates.append((d, t, label))
+    )
+
+    assert {p.id for p in people} == {"ramin", "alex"}
+    # One report before each of the two sources, plus a final completion report.
+    assert updates[0] == (0, 2, "Fetching Ramin — Wealthsimple")
+    assert updates[1] == (1, 2, "Fetching Alex — Questrade")
+    assert updates[-1] == (2, 2, "Finalizing")
+
+
 # --------------------------------------------------------------------------- #
 # Reload via worker + error banner (Phase 10)
 # --------------------------------------------------------------------------- #
@@ -246,6 +326,26 @@ def test_reload_updates_data_and_timestamp(qtbot) -> None:
     qtbot.waitUntil(lambda: window.last_updated != "", timeout=2000)
     assert window.last_updated == "Updated 2026-06-08 09:00"
     assert window.banner.isHidden()
+    # The loading bar is hidden again once the fetch completes.
+    assert window.progress.isHidden()
+
+
+def test_reload_drives_progress_bar(qtbot) -> None:
+    extra = Person(id="alex", name="Alex", accounts=load_accounts(FIXTURE))
+
+    def loader(report) -> tuple[Person, ...]:
+        report(0, 2, "Fetching Ramin — Wealthsimple")
+        report(1, 2, "Fetching Alex — Questrade")
+        return (*_people(), extra)
+
+    window = MainWindow(people=_people(), provider=PROVIDER, display_currency=CAD, loader=loader)
+    qtbot.addWidget(window)
+
+    window.reload_data()
+    qtbot.waitUntil(lambda: window.last_updated != "", timeout=2000)
+    # Bar advanced to the reported total and is hidden again after success.
+    assert window.progress.maximum() == 2
+    assert window.progress.isHidden()
 
 
 def test_reload_failure_shows_error_banner(qtbot) -> None:

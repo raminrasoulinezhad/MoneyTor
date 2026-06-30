@@ -36,6 +36,7 @@ from moneytor.ui.views.dashboard import DashboardView
 from moneytor.ui.widgets.banner import ErrorBanner
 from moneytor.ui.widgets.kpi_panel import KpiPanel
 from moneytor.ui.widgets.lock_screen import LockScreen
+from moneytor.ui.widgets.progress_bar import FetchProgressBar
 from moneytor.ui.widgets.sidebar import Sidebar
 from moneytor.ui.workers import FetchWorker
 
@@ -84,6 +85,10 @@ class MainWindow(QMainWindow):
 
         self.banner = ErrorBanner()
         outer.addWidget(self.banner)
+
+        # Full-width loading bar shown only while a refresh is in flight.
+        self.progress = FetchProgressBar()
+        outer.addWidget(self.progress)
 
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
@@ -162,7 +167,9 @@ class MainWindow(QMainWindow):
         if self._loader is None or (self._worker is not None and self._worker.isRunning()):
             return
         self.dashboard.set_loading(True)
+        self.progress.begin()
         self._worker = FetchWorker(task=self._loader)
+        self._worker.progress.connect(self._on_progress)
         self._worker.succeeded.connect(self._on_reloaded)
         self._worker.failed.connect(self._on_reload_failed)
         self._worker.start()
@@ -240,13 +247,18 @@ class MainWindow(QMainWindow):
         self._selected_ids = account_ids or None
         self.refresh()
 
+    def _on_progress(self, done: int, total: int, label: str) -> None:
+        self.progress.set_progress(done, total, label)
+
     def _on_reloaded(self, people: object) -> None:
+        self.progress.finish()
         self.banner.hide()
         if isinstance(people, tuple):
             self.set_people(people)
         self._updated_label.setText(f"Updated {self._clock()}")
 
     def _on_reload_failed(self, exc: object) -> None:
+        self.progress.finish()
         detail = str(exc) if isinstance(exc, ConnectorError) else "Unexpected error."
         self.banner.show_message(f"Could not refresh data: {detail}")
 
