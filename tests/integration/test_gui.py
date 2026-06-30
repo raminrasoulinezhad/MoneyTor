@@ -153,9 +153,18 @@ def test_export_report_writes_markdown_and_pdf(qtbot, tmp_path) -> None:
 def test_chart_panel_shows_summary_fallback_when_headless(qtbot) -> None:
     # Under the offscreen platform, the panel falls back to a text summary.
     window = _window(qtbot)
-    body = window.dashboard.chart_panel._body
+    body = window.dashboard.left_chart._body
     assert body.isVisible() or body.text()  # populated
     assert "Allocation" in body.text()
+
+
+def test_dashboard_has_two_charts_with_default_modes(qtbot) -> None:
+    # Two side-by-side panels: the left defaults to Holdings, the right Sectors.
+    window = _window(qtbot)
+    assert window.dashboard.left_chart.selector.currentText() == "Holdings"
+    assert window.dashboard.right_chart.selector.currentText() == "Sectors"
+    assert "Allocation" in window.dashboard.left_chart._body.text()
+    assert "Sectors" in window.dashboard.right_chart._body.text()
 
 
 def test_table_sorts_market_value_numerically(qtbot) -> None:
@@ -215,20 +224,22 @@ def test_rank_index_is_stable_under_search(qtbot) -> None:
     assert _rank_of(table, "AAPL") == full_rank  # unchanged after clearing
 
 
-def test_chart_selector_switches_to_sectors(qtbot) -> None:
+def test_chart_selector_switches_independently(qtbot) -> None:
     window = _window(qtbot)
-    panel = window.dashboard.chart_panel
-    assert "Allocation" in panel._body.text()  # holdings mode by default
-    panel.selector.setCurrentText("Sectors")
-    assert "Sectors" in panel._body.text()  # fallback summary switched modes
+    left = window.dashboard.left_chart
+    assert "Allocation" in left._body.text()  # holdings mode by default
+    left.selector.setCurrentText("Sectors")
+    assert "Sectors" in left._body.text()  # fallback summary switched modes
+    # Switching the left panel leaves the right one untouched.
+    assert window.dashboard.right_chart.selector.currentText() == "Sectors"
 
 
 def test_chart_panel_empty_selection_message(qtbot) -> None:
     window = _window(qtbot)
     window._on_selection_changed(frozenset())
     # Selecting nothing means "show all", so still has holdings; force empty:
-    window.dashboard.chart_panel.set_allocation(())
-    assert "No holdings" in window.dashboard.chart_panel._body.text()
+    window.dashboard.left_chart.set_allocation(())
+    assert "No holdings" in window.dashboard.left_chart._body.text()
 
 
 def test_fetch_worker_reports_success(qtbot) -> None:

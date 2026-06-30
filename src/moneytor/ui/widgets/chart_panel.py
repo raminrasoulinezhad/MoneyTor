@@ -40,7 +40,7 @@ _SECTORS = "Sectors"
 class ChartPanel(QWidget):
     """Card container for the main dashboard chart (holdings or sector pie)."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, default_mode: str = _HOLDINGS, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("Panel")
 
@@ -54,6 +54,9 @@ class ChartPanel(QWidget):
         self.selector = QComboBox()
         self.selector.setObjectName("ChartSelector")
         self.selector.addItems([_HOLDINGS, _SECTORS])
+        # Set the starting mode before wiring the signal (no spurious rerender).
+        if default_mode in (_HOLDINGS, _SECTORS):
+            self.selector.setCurrentText(default_mode)
         self.selector.currentTextChanged.connect(self._rerender)
         header.addWidget(title)
         header.addStretch(1)

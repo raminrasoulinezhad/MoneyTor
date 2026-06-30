@@ -3,11 +3,12 @@
 # Noncommercial use permitted. Commercial use requires a separate license;
 # contact the author. Provided "as is", without warranty of any kind.
 
-"""The main dashboard: KPI card row, chart panel, and holdings table."""
+"""The main dashboard: two side-by-side chart panels and the holdings table."""
 
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
+    QHBoxLayout,
     QLineEdit,
     QVBoxLayout,
     QWidget,
@@ -20,7 +21,7 @@ from moneytor.ui.widgets.holdings_table import HoldingsTable
 
 
 class DashboardView(QWidget):
-    """The chart panel and the holdings table (KPIs live in the left column)."""
+    """Two side-by-side chart panels and the holdings table (KPIs live left)."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -33,8 +34,17 @@ class DashboardView(QWidget):
         self._tokens: ThemeTokens = DARK
         self._last_rows: tuple[HoldingRow, ...] = ()
 
-        self.chart_panel = ChartPanel()
-        self._outer.addWidget(self.chart_panel)
+        # Two equal-width chart panels side by side, each with its own selector.
+        # They default to complementary views (Holdings | Sectors) but either
+        # can be switched to any available chart independently.
+        charts_row = QHBoxLayout()
+        charts_row.setSpacing(24)
+        self.left_chart = ChartPanel(default_mode="Holdings")
+        self.right_chart = ChartPanel(default_mode="Sectors")
+        self._charts = (self.left_chart, self.right_chart)
+        for chart in self._charts:
+            charts_row.addWidget(chart, stretch=1)
+        self._outer.addLayout(charts_row)
 
         self.search = QLineEdit()
         self.search.setObjectName("SearchBox")
@@ -47,18 +57,20 @@ class DashboardView(QWidget):
         self._outer.addWidget(self.table, stretch=1)
 
     def set_theme_tokens(self, tokens: ThemeTokens) -> None:
-        """Set the palette used for the chart and re-render it if data exists."""
+        """Set the palette used for the charts and re-render them if data exists."""
         self._tokens = tokens
         if self._last_rows:
-            self.chart_panel.set_allocation(self._last_rows, self._tokens)
+            for chart in self._charts:
+                chart.set_allocation(self._last_rows, self._tokens)
 
     def set_view_model(self, view_model: DashboardViewModel) -> None:
-        """Render the table rows and the chart for ``view_model``."""
+        """Render the table rows and both charts for ``view_model``."""
         self._last_rows = view_model.rows
         # The table owns sorting/filtering and keeps the active search text, so
-        # it re-renders honouring it. The chart always reflects the full set.
+        # it re-renders honouring it. The charts always reflect the full set.
         self.table.set_rows(view_model.rows)
-        self.chart_panel.set_allocation(view_model.rows, self._tokens)
+        for chart in self._charts:
+            chart.set_allocation(view_model.rows, self._tokens)
 
     def focus_search(self) -> None:
         """Focus and select the search box (wired to Ctrl+F)."""
@@ -70,6 +82,7 @@ class DashboardView(QWidget):
         self.table.set_filter(self.search.text())
 
     def set_loading(self, loading: bool) -> None:
-        """Toggle a simple loading state on the chart panel."""
+        """Toggle a simple loading state on both chart panels."""
         if loading:
-            self.chart_panel.set_placeholder_text("Loading portfolio…")
+            for chart in self._charts:
+                chart.set_placeholder_text("Loading portfolio…")
