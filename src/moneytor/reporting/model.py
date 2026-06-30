@@ -1,3 +1,8 @@
+# Copyright (c) 2026 Seyedramin Rasoulinezhad
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+# Noncommercial use permitted. Commercial use requires a separate license;
+# contact the author. Provided "as is", without warranty of any kind.
+
 """A render-agnostic report model built from a PortfolioSnapshot.
 
 Both the Markdown and PDF renderers consume this, so the two outputs stay in

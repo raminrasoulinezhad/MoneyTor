@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 Seyedramin Rasoulinezhad
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+# Noncommercial use permitted. Commercial use requires a separate license;
+# contact the author. Provided "as is", without warranty of any kind.
+
 # Launch the MoneyTor GUI from a desktop icon / app-grid entry.
 #
 # A double-clicked .desktop launcher inherits none of your shell environment,

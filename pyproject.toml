@@ -5,6 +5,7 @@ description = "Personal & family financial aggregation cockpit for Canadian brok
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [{ name = "Seyedramin Rasoulinezhad" }]
+license = { file = "LICENSE" }
 dependencies = [
     "fpdf2>=2.8.7",
     "httpx>=0.28.1",

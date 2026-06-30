@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 Seyedramin Rasoulinezhad
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+# Noncommercial use permitted. Commercial use requires a separate license;
+# contact the author. Provided "as is", without warranty of any kind.
+
 # Install (or remove) the MoneyTor desktop launcher on Linux.
 #
 #   ./scripts/install-desktop.sh            # install: app grid + desktop icon

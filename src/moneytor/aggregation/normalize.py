@@ -1,3 +1,8 @@
+# Copyright (c) 2026 Seyedramin Rasoulinezhad
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+# Noncommercial use permitted. Commercial use requires a separate license;
+# contact the author. Provided "as is", without warranty of any kind.
+
 """Symbol normalization — collapse the same asset across exchanges.
 
 A holding carries a ``symbol`` and an ``exchange`` (e.g. ``SHOP`` on ``TSX`` vs

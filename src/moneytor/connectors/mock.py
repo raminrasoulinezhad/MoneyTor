@@ -1,3 +1,8 @@
+# Copyright (c) 2026 Seyedramin Rasoulinezhad
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+# Noncommercial use permitted. Commercial use requires a separate license;
+# contact the author. Provided "as is", without warranty of any kind.
+
 """A fixture-driven connector for development and testing.
 
 ``MockConnector`` implements the :class:`~moneytor.connectors.base.Connector`

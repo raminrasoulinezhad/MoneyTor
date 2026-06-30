@@ -1,3 +1,8 @@
+# Copyright (c) 2026 Seyedramin Rasoulinezhad
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+# Noncommercial use permitted. Commercial use requires a separate license;
+# contact the author. Provided "as is", without warranty of any kind.
+
 """Shared helpers for mapping loosely-typed JSON into typed domain values.
 
 ``Any`` is intentional here: these inputs are external, untyped API payloads.

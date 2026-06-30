@@ -1,3 +1,8 @@
+# Copyright (c) 2026 Seyedramin Rasoulinezhad
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+# Noncommercial use permitted. Commercial use requires a separate license;
+# contact the author. Provided "as is", without warranty of any kind.
+
 """``Money`` — a currency-tagged, ``Decimal``-backed value object.
 
 All monetary values in MoneyTor flow through this type. It never uses ``float``

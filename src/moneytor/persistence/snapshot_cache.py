@@ -1,3 +1,8 @@
+# Copyright (c) 2026 Seyedramin Rasoulinezhad
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+# Noncommercial use permitted. Commercial use requires a separate license;
+# contact the author. Provided "as is", without warranty of any kind.
+
 """Persist fetched portfolio data for offline viewing and fast cold starts.
 
 Caches the normalized people/accounts (the expensive-to-fetch inputs) as JSON;
