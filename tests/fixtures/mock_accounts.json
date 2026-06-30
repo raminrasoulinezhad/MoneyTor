@@ -1,0 +1,67 @@
+[
+  {
+    "id": "qt-tfsa-ramin",
+    "person_id": "ramin",
+    "institution": "questrade",
+    "account_type": "tfsa",
+    "cash": { "amount": "1500.00", "currency": "CAD" },
+    "holdings": [
+      {
+        "symbol": "SHOP",
+        "name": "Shopify Inc.",
+        "exchange": "TSX",
+        "asset_class": "equity",
+        "quantity": "10",
+        "book_value": { "amount": "1000.00", "currency": "CAD" },
+        "market_value": { "amount": "1200.50", "currency": "CAD" }
+      },
+      {
+        "symbol": "VFV",
+        "name": "Vanguard S&P 500 Index ETF",
+        "exchange": "TSX",
+        "asset_class": "etf",
+        "quantity": "25",
+        "book_value": { "amount": "2500.00", "currency": "CAD" },
+        "market_value": { "amount": "3100.00", "currency": "CAD" },
+        "dividend_yield": "0.012"
+      }
+    ]
+  },
+  {
+    "id": "ws-margin-ramin",
+    "person_id": "ramin",
+    "institution": "wealthsimple",
+    "account_type": "margin",
+    "cash": { "amount": "300.00", "currency": "USD" },
+    "holdings": [
+      {
+        "symbol": "AAPL",
+        "name": "Apple Inc.",
+        "exchange": "NASDAQ",
+        "asset_class": "equity",
+        "quantity": "5",
+        "book_value": { "amount": "800.00", "currency": "USD" },
+        "market_value": { "amount": "950.75", "currency": "USD" },
+        "dividend_yield": "0.005"
+      }
+    ]
+  },
+  {
+    "id": "qt-gic-ramin",
+    "person_id": "ramin",
+    "institution": "questrade",
+    "account_type": "gic",
+    "cash": { "amount": "0.00", "currency": "CAD" },
+    "holdings": [
+      {
+        "symbol": "GIC-OAKEN-2027",
+        "name": "Oaken Financial GIC 4.50% 2027",
+        "exchange": "",
+        "asset_class": "gic",
+        "quantity": "1",
+        "book_value": { "amount": "2000.00", "currency": "CAD" },
+        "market_value": { "amount": "2000.00", "currency": "CAD" }
+      }
+    ]
+  }
+]

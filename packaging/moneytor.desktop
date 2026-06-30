@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=MoneyTor
+GenericName=Financial Cockpit
+Comment=Personal & family financial aggregation cockpit for Canadian brokerages
+Exec=__PROJECT_ROOT__/scripts/moneytor.sh
+Icon=__PROJECT_ROOT__/packaging/moneytor.png
+Terminal=false
+Categories=Office;Finance;
+Keywords=finance;portfolio;stocks;questrade;wealthsimple;
+StartupNotify=true
+StartupWMClass=moneytor

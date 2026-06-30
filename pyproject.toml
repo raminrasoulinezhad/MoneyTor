@@ -6,6 +6,10 @@ readme = "README.md"
 requires-python = ">=3.12"
 authors = [{ name = "Seyedramin Rasoulinezhad" }]
 dependencies = [
+    "fpdf2>=2.8.7",
+    "httpx>=0.28.1",
+    "plotly>=6.8.0",
+    "pyside6>=6.11.1",
     "python-dotenv>=1.0",
 ]
 
@@ -19,6 +23,7 @@ dev = [
     "ruff>=0.6",
     "pylint>=3.0",
     "mypy>=1.11",
+    "pytest-qt>=4.5.0",
 ]
 
 [build-system]
@@ -69,9 +74,39 @@ mypy_path = "src"
 packages = ["moneytor"]
 warn_unused_configs = true
 
+# The pure core stays fully strict. GUI glue against the PySide6 C++ bindings
+# needs relaxation: signals/slots and many Qt calls are typed as Any.
+[[tool.mypy.overrides]]
+module = "moneytor.ui.*"
+disallow_untyped_calls = false
+warn_return_any = false
+
+[[tool.mypy.overrides]]
+module = ["PySide6.*", "plotly.*"]
+ignore_missing_imports = true
+
 [tool.pylint.main]
 source-roots = ["src"]
+extension-pkg-allow-list = ["PySide6"]
+
+[tool.pylint.typecheck]
+# PySide6 signals are dynamic; tell pylint their members exist.
+generated-members = ["connect", "disconnect", "emit"]
+
+[tool.pylint.design]
+# UI windows and the design-token dataclass legitimately carry many fields.
+max-attributes = 20
+max-args = 8
+max-positional-arguments = 8
 
 [tool.pylint."messages control"]
 # Defer opinionated docstring/format rules to ruff; keep pylint for deep checks.
-disable = ["missing-module-docstring", "missing-class-docstring", "missing-function-docstring"]
+disable = [
+    "missing-module-docstring",
+    "missing-class-docstring",
+    "missing-function-docstring",
+    "too-few-public-methods",
+    # Analogous adapters across layers (report model vs UI view-model) and
+    # similar connector shapes legitimately resemble each other.
+    "duplicate-code",
+]

@@ -1,0 +1,27 @@
+# gitleaks configuration for MoneyTor.
+#
+# Extends gitleaks' built-in ruleset (AWS keys, private keys, generic
+# high-entropy API tokens, etc.) and adds a small allowlist for values that
+# look secret-ish but are not. Used by both the pre-commit hook and the CI
+# secret-scan workflow.
+
+title = "MoneyTor secret scan"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known non-secrets and documentation placeholders"
+
+regexes = [
+  # Public, community-documented Wealthsimple OAuth client id baked into the
+  # connector. It is a fixed public identifier, not a credential.
+  '''4da53ac2b03225bed1550eba8e4611e086c7b905a3855e6ed12ea08c246758fa''',
+  # Obvious placeholders/fixtures (never real secrets).
+  '''(?i)(change-me|fixture-[a-z-]+|ws-pass|example\.com)''',
+]
+
+paths = [
+  # The committed template only carries placeholder keys, never real values.
+  '''\.env\.example$''',
+]
