@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/logo.png" alt="MoneyTor logo" width="420">
+</p>
+
 # MoneyTor
 
 **MoneyTor** is your personal & family financial **cockpit**. It connects to your
@@ -7,6 +11,35 @@ all on a clean dashboard with charts — plus exportable PDF and Markdown report
 
 > Developers: see [`DEVELOPERS_README.md`](./DEVELOPERS_README.md) for the
 > project layout, testing, and contribution guide.
+
+---
+
+## A look at the cockpit
+
+![MoneyTor dashboard](docs/images/app_screenshot.png)
+
+The dashboard puts everything on one screen:
+
+- **KPI cards** (left) — total portfolio value, estimated annual dividends, GIC
+  interest, combined income, holdings count, and your top position.
+- **Two charts** (center) — each picks its own view independently, so you can
+  show holdings on one side and sector allocation on the other.
+- **Holdings table** (bottom) — every position merged across accounts and
+  brokerages, with allocation %, distance from the 52-week high, and unit price.
+- **Sidebar** (left) — toggle individual people and accounts on and off.
+
+### Why are the numbers hidden behind `••••••`?
+
+That screenshot was taken with **private mode** switched on — notice the button
+in the top-right reads **“Reveal values”**. Private mode is a one-click privacy
+screen for when someone is looking over your shoulder or you're sharing your
+display. It masks every dollar figure — the total value, the dividend / GIC /
+income estimates, and each holding's share count and market value — while
+leaving non-sensitive context (allocation %, sectors, unit prices) visible.
+
+Turning private mode **on** is instant. Turning it **off** (revealing the
+numbers again) requires your password, so a bystander can't simply switch it
+back. See [Set up your accounts](#2-set-up-your-accounts-env) for the password.
 
 ---
 
