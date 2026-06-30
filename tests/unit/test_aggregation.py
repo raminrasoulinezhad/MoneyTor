@@ -377,3 +377,229 @@ def test_bullion_symbols_classified_as_bullion(symbol: str) -> None:
 )
 def test_normalize_sector_maps_to_gics(raw: str, expected: str) -> None:
     assert normalize_sector(raw) == expected
+
+
+# --------------------------------------------------------------------------- #
+# Merge — additional numerical edge cases
+# --------------------------------------------------------------------------- #
+
+
+def test_merge_same_symbol_same_currency_sums_across_accounts() -> None:
+    # The same security held in two accounts (same currency) must aggregate.
+    unified = merge_holdings(
+        [
+            _holding("SHOP", "TSX", CAD, "10", "1000.00"),
+            _holding("SHOP", "TSX", CAD, "15", "1500.00"),
+        ],
+        CAD,
+        PROVIDER,
+    )
+    assert len(unified) == 1
+    assert unified[0].total_quantity == Decimal("25")
+    assert unified[0].total_market_value == Money.of("2500.00", CAD)
+
+
+def test_merge_empty_input_returns_empty() -> None:
+    assert merge_holdings([], CAD, PROVIDER) == ()
+
+
+def test_merge_keeps_first_non_none_dividend_yield() -> None:
+    # When sources disagree, the first non-None yield (in input order) wins.
+    first_blank = replace(_holding("X", "TSX", CAD, "1", "10"), dividend_yield=None)
+    has_yield = replace(_holding("X", "NYSE", USD, "1", "10"), dividend_yield=Decimal("0.03"))
+    assert merge_holdings([first_blank, has_yield], CAD, PROVIDER)[0].dividend_yield == Decimal(
+        "0.03"
+    )
+    conflicting_first = replace(
+        _holding("X", "TSX", CAD, "1", "10"), dividend_yield=Decimal("0.02")
+    )
+    assert merge_holdings([conflicting_first, has_yield], CAD, PROVIDER)[
+        0
+    ].dividend_yield == Decimal("0.02")
+
+
+def test_merge_takes_asset_class_from_first_member() -> None:
+    equity = _holding("X", "TSX", CAD, "1", "10")  # EQUITY
+    bond = replace(_holding("X", "TSX", CAD, "1", "10"), asset_class=AssetClass.FIXED_INCOME)
+    assert merge_holdings([equity, bond], CAD, PROVIDER)[0].asset_class is AssetClass.EQUITY
+    assert merge_holdings([bond, equity], CAD, PROVIDER)[0].asset_class is AssetClass.FIXED_INCOME
+
+
+# --------------------------------------------------------------------------- #
+# Allocation — division-by-zero, single symbol, precision
+# --------------------------------------------------------------------------- #
+
+
+def _snapshot_of(*holdings: Holding):
+    account = Account(
+        id="a",
+        person_id="p",
+        institution=Institution.QUESTRADE,
+        account_type=AccountType.TFSA,
+        cash=Money.zero(CAD),
+        holdings=holdings,
+    )
+    return build_snapshot((Person(id="p", name="P", accounts=(account,)),), CAD, PROVIDER)
+
+
+def test_allocation_single_symbol_is_one() -> None:
+    alloc = allocation_by_symbol(_snapshot_of(_holding("AAA", "TSX", CAD, "1", "500")))
+    assert alloc == {"AAA": Decimal("1.0000")}
+
+
+def test_allocation_all_zero_values_returns_zeros_not_div_by_zero() -> None:
+    alloc = allocation_by_symbol(
+        _snapshot_of(_holding("AAA", "TSX", CAD, "1", "0"), _holding("BBB", "TSX", CAD, "1", "0"))
+    )
+    assert alloc == {"AAA": Decimal("0"), "BBB": Decimal("0")}
+
+
+def test_allocation_respects_places_parameter() -> None:
+    snapshot = _snapshot_of(
+        _holding("AAA", "TSX", CAD, "1", "1"), _holding("BBB", "TSX", CAD, "1", "2")
+    )
+    alloc = allocation_by_symbol(snapshot, places=2)
+    # 1/3 and 2/3 rounded to 2 places.
+    assert alloc == {"AAA": Decimal("0.33"), "BBB": Decimal("0.67")}
+
+
+# --------------------------------------------------------------------------- #
+# Dividend / GIC interest — extra branches
+# --------------------------------------------------------------------------- #
+
+
+def test_annual_dividend_income_explicit_zero_yield_contributes_zero() -> None:
+    holding = replace(_holding("AAA", "TSX", CAD, "1", "1000"), dividend_yield=Decimal("0"))
+    assert annual_dividend_income(_snapshot_of(holding)) == Money.zero(CAD)
+
+
+def test_annual_dividend_income_empty_snapshot_is_zero() -> None:
+    assert annual_dividend_income(build_snapshot((), CAD, PROVIDER)) == Money.zero(CAD)
+
+
+def test_annual_gic_interest_falls_back_to_rate_in_symbol() -> None:
+    # Rate absent from the name but present in the symbol -> still counted.
+    gic = replace(
+        _holding("GIC 3% 2026", "", CAD, "1", "1000.00"),
+        asset_class=AssetClass.GIC,
+        name="Generic GIC",
+    )
+    assert annual_gic_interest(_snapshot_of(gic)) == Money.of("30.00", CAD)
+
+
+def test_annual_gic_interest_empty_snapshot_is_zero() -> None:
+    assert annual_gic_interest(build_snapshot((), CAD, PROVIDER)) == Money.zero(CAD)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("GIC 3% bonus 4%", Decimal("0.03")),  # first percentage wins
+        ("GIC\t5%\t2027", Decimal("0.05")),  # tab whitespace
+        ("GIC 03% 1yr", Decimal("0.03")),  # leading zero
+        ("GIC 0% promo", Decimal("0")),  # explicit zero rate
+        ("", None),  # empty string
+    ],
+)
+def test_gic_interest_rate_edge_cases(text: str, expected: Decimal | None) -> None:
+    assert gic_interest_rate(text) == expected
+
+
+# --------------------------------------------------------------------------- #
+# Account / person / totals — extra rollup cases
+# --------------------------------------------------------------------------- #
+
+
+def test_account_value_converts_mixed_currency_holdings() -> None:
+    account = Account(
+        id="a",
+        person_id="p",
+        institution=Institution.QUESTRADE,
+        account_type=AccountType.MARGIN,
+        cash=Money.of("100", CAD),
+        holdings=(_holding("C", "TSX", CAD, "1", "500"), _holding("U", "NYSE", USD, "1", "300")),
+    )
+    # 100 CAD + 500 CAD + (300 USD * 1.35 = 405) = 1005.00 CAD
+    assert account_value(account, CAD, PROVIDER) == Money.of("1005.00", CAD)
+
+
+def test_person_value_with_no_accounts_is_zero() -> None:
+    person = Person(id="p", name="P", accounts=())
+    assert person_value(person, CAD, PROVIDER) == Money.zero(CAD)
+
+
+def test_totals_by_currency_empty_people_is_empty() -> None:
+    assert totals_by_currency(()) == {}
+
+
+def test_totals_by_currency_sums_duplicate_currency_across_accounts() -> None:
+    def cad_account(id_: str, cash: str) -> Account:
+        return Account(
+            id=id_,
+            person_id="p",
+            institution=Institution.QUESTRADE,
+            account_type=AccountType.TFSA,
+            cash=Money.of(cash, CAD),
+            holdings=(_holding("AAA", "TSX", CAD, "1", "100"),),
+        )
+
+    person = Person(id="p", name="P", accounts=(cad_account("a", "10"), cad_account("b", "20")))
+    totals = totals_by_currency((person,))
+    # cash 10 + 20 + holdings 100 + 100 = 230
+    assert totals[CAD] == Money.of("230", CAD)
+
+
+# --------------------------------------------------------------------------- #
+# Snapshot — asset map applied during merge
+# --------------------------------------------------------------------------- #
+
+
+def test_asset_map_from_file_loads_overrides(tmp_path: Path) -> None:
+    path = tmp_path / "assets.json"
+    path.write_text('{"SHOP.TO": "SHOP", "shopify": "SHOP"}', encoding="utf-8")
+    amap = AssetMap.from_file(path)
+    assert amap.canonical("SHOPIFY") == "SHOP"
+    assert amap.canonical("SHOP.TO") == "SHOP"
+
+
+def test_asset_map_from_file_rejects_non_object(tmp_path: Path) -> None:
+    path = tmp_path / "assets.json"
+    path.write_text('["not", "an", "object"]', encoding="utf-8")
+    with pytest.raises(ValueError, match="must be a JSON object"):
+        AssetMap.from_file(path)
+
+
+def test_sector_map_from_file_loads_and_normalizes(tmp_path: Path) -> None:
+    path = tmp_path / "sectors.json"
+    path.write_text('{"AAPL": "Technology"}', encoding="utf-8")
+    smap = SectorMap.from_file(path)
+    assert smap.get("aapl") == "Information Technology"  # normalized to GICS
+
+
+def test_sector_map_from_file_rejects_non_object(tmp_path: Path) -> None:
+    path = tmp_path / "sectors.json"
+    path.write_text('"just a string"', encoding="utf-8")
+    with pytest.raises(ValueError, match="must be a JSON object"):
+        SectorMap.from_file(path)
+
+
+def test_build_snapshot_applies_asset_map_override() -> None:
+    account = Account(
+        id="a",
+        person_id="p",
+        institution=Institution.QUESTRADE,
+        account_type=AccountType.TFSA,
+        cash=Money.zero(CAD),
+        holdings=(
+            _holding("SHOPIFY", "TSX", CAD, "1", "10"),
+            _holding("SHOP", "TSX", CAD, "1", "10"),
+        ),
+    )
+    snapshot = build_snapshot(
+        (Person(id="p", name="P", accounts=(account,)),),
+        CAD,
+        PROVIDER,
+        asset_map=AssetMap({"SHOPIFY": "SHOP"}),
+    )
+    assert [u.symbol for u in snapshot.unified_holdings] == ["SHOP"]
+    assert snapshot.unified_holdings[0].total_quantity == Decimal("2")

@@ -53,6 +53,33 @@ def test_usd_cad_table_is_two_way() -> None:
     assert table[(CAD, USD)] == Decimal(1) / Decimal("1.25")
 
 
+def test_usd_cad_table_inverse_keeps_full_precision() -> None:
+    # The inverse is not rounded — full Decimal precision is preserved so the
+    # round-trip stays as accurate as the source rate allows.
+    table = usd_cad_table(Decimal("1.35"))
+    assert table[(CAD, USD)] == Decimal(1) / Decimal("1.35")
+
+
+def test_fetch_usd_cad_creates_and_closes_its_own_client(monkeypatch) -> None:
+    from moneytor.fx import live
+
+    closed = {"value": False}
+
+    class _TrackingClient(httpx.Client):
+        def close(self) -> None:
+            closed["value"] = True
+            super().close()
+
+    def factory(*args, **kwargs) -> httpx.Client:
+        handler = lambda r: httpx.Response(200, json={"rates": {"CAD": 1.41}})  # noqa: E731
+        return _TrackingClient(transport=httpx.MockTransport(handler))
+
+    monkeypatch.setattr(live.httpx, "Client", factory)
+    # Called with no client: it must build one and close it afterwards.
+    assert fetch_usd_cad() == Decimal("1.41")
+    assert closed["value"] is True
+
+
 def test_snapshot_uses_fallback_then_refreshes() -> None:
     provider = SnapshotFxProvider(Decimal("1.36"), fetcher=lambda: Decimal("1.40"))
     assert provider.get_rate(USD, CAD) == Decimal("1.36")

@@ -138,3 +138,84 @@ def test_str_matches_format() -> None:
 def test_format_without_currency_code() -> None:
     assert Money.of("1234.5", CAD).format(with_currency=False) == "$1,234.50"
     assert Money.of("-50", USD).format(with_currency=False) == "-$50.00"
+
+
+# --------------------------------------------------------------------------- #
+# Construction — type rejection (the remaining guards)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("bad", [None, [1], {"a": 1}, (1,)])
+def test_rejects_unsupported_amount_types(bad: object) -> None:
+    with pytest.raises(TypeError, match="Unsupported amount type"):
+        Money(bad, CAD)  # type: ignore[arg-type]
+
+
+def test_rejects_non_currency() -> None:
+    with pytest.raises(TypeError, match="must be a Currency"):
+        Money(Decimal("1"), "CAD")  # type: ignore[arg-type]
+
+
+# --------------------------------------------------------------------------- #
+# Comparisons — the <= and > operators and their currency guards
+# --------------------------------------------------------------------------- #
+
+
+def test_le_and_gt_same_currency() -> None:
+    assert Money.of("2", CAD) <= Money.of("2", CAD)
+    assert Money.of("1", CAD) <= Money.of("2", CAD)
+    assert Money.of("3", CAD) > Money.of("2", CAD)
+    assert not (Money.of("2", CAD) > Money.of("2", CAD))
+
+
+@pytest.mark.parametrize("op", ["le", "gt"])
+def test_le_gt_mixed_currency_raises(op: str) -> None:
+    import operator
+
+    with pytest.raises(CurrencyMismatchError):
+        getattr(operator, op)(Money.of("1", CAD), Money.of("1", USD))
+
+
+# --------------------------------------------------------------------------- #
+# Arithmetic edge cases
+# --------------------------------------------------------------------------- #
+
+
+def test_multiply_by_zero_and_negative() -> None:
+    assert (Money.of("100", CAD) * 0).amount == Decimal("0")
+    assert (Money.of("100", CAD) * -1).amount == Decimal("-100")
+    assert (Money.of("100", CAD) * Decimal("-0.5")).amount == Decimal("-50.0")
+
+
+def test_subtraction_crossing_zero() -> None:
+    assert (Money.of("2", CAD) - Money.of("5", CAD)).amount == Decimal("-3")
+
+
+def test_zero_is_additive_identity() -> None:
+    assert (Money.zero(CAD) + Money.of("-100", CAD)).amount == Decimal("-100")
+    assert Money.zero(CAD).format() == "$0.00 CAD"
+
+
+# --------------------------------------------------------------------------- #
+# Rounding & formatting with non-default places
+# --------------------------------------------------------------------------- #
+
+
+def test_quantize_negative_uses_bankers_rounding() -> None:
+    # -2.675 -> -2.68 (round half to even, away from zero here)
+    assert Money.of("-2.675", CAD).quantize().amount == Decimal("-2.68")
+
+
+@pytest.mark.parametrize(
+    ("places", "expected"),
+    [(0, Decimal("0")), (1, Decimal("0.3")), (4, Decimal("0.3333"))],
+)
+def test_quantize_respects_places(places: int, expected: Decimal) -> None:
+    third = Decimal(1) / Decimal(3)  # 0.333... -> 0, 0.3, 0.3333 at 0/1/4 places
+    assert Money(third, CAD).quantize(places).amount == expected
+
+
+def test_format_with_non_default_places() -> None:
+    # places=0 rounds to the nearest dollar and shows no decimals.
+    assert Money.of("1234.5678", CAD).format(places=0) == "$1,235 CAD"
+    assert Money.of("1.5", CAD).format(places=4) == "$1.5000 CAD"

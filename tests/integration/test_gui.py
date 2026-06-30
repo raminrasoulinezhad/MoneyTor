@@ -224,6 +224,113 @@ def test_rank_index_is_stable_under_search(qtbot) -> None:
     assert _rank_of(table, "AAPL") == full_rank  # unchanged after clearing
 
 
+# --------------------------------------------------------------------------- #
+# Holdings table sorting (numeric vs text, None handling, tie stability)
+# --------------------------------------------------------------------------- #
+
+
+def _sort_row(symbol: str, qty: str, value: str, *, high=None, unit=None):
+    from decimal import Decimal
+
+    from moneytor.domain import Money
+    from moneytor.ui.viewmodels import HoldingRow
+
+    return HoldingRow(
+        symbol=symbol,
+        asset_class="equity",
+        quantity=Decimal(qty),
+        value=Money.of(value, CAD),
+        allocation=Decimal("0"),
+        high_52w_pct=high,
+        unit_price_native=unit,
+    )
+
+
+def _make_table(qtbot, rows):
+    from moneytor.ui.widgets.holdings_table import HoldingsTable
+
+    table = HoldingsTable()
+    qtbot.addWidget(table)
+    table.set_rows(rows)
+    return table
+
+
+def _column(table, col: int) -> list[str]:
+    return [table.item(r, col).text() for r in range(table.rowCount())]
+
+
+def test_quantity_sorts_numerically_not_lexicographically(qtbot) -> None:
+    from decimal import Decimal
+
+    table = _make_table(
+        qtbot,
+        [
+            _sort_row("AAA", "9", "100"),
+            _sort_row("BBB", "100", "200"),
+            _sort_row("CCC", "25", "150"),
+        ],
+    )
+    table.horizontalHeader().sectionClicked.emit(4)  # Quantity, defaults descending
+    quantities = [Decimal(t) for t in _column(table, 4)]
+    assert quantities == [Decimal("100"), Decimal("25"), Decimal("9")]
+
+
+def test_none_52whg_sorts_to_bottom_descending_top_ascending(qtbot) -> None:
+    from decimal import Decimal
+
+    table = _make_table(
+        qtbot,
+        [
+            _sort_row("AAA", "1", "100", high=None),
+            _sort_row("BBB", "1", "100", high=Decimal("0.5")),
+            _sort_row("CCC", "1", "100", high=Decimal("0.1")),
+        ],
+    )
+    table.horizontalHeader().sectionClicked.emit(7)  # 52WHG descending: missing last
+    assert _column(table, 0) == ["BBB", "CCC", "AAA"]
+    assert _column(table, 7)[-1] == "—"
+    table.horizontalHeader().sectionClicked.emit(7)  # ascending: missing first
+    assert _column(table, 0) == ["AAA", "CCC", "BBB"]
+    assert _column(table, 7)[0] == "—"
+
+
+def test_none_unit_price_sorts_consistently(qtbot) -> None:
+    from moneytor.domain import Money
+
+    table = _make_table(
+        qtbot,
+        [
+            _sort_row("AAA", "1", "100", unit=Money.of("10", USD)),
+            _sort_row("BBB", "1", "100", unit=None),
+            _sort_row("CCC", "1", "100", unit=Money.of("50", USD)),
+        ],
+    )
+    table.horizontalHeader().sectionClicked.emit(8)  # Unit Price descending: missing last
+    assert _column(table, 0) == ["CCC", "AAA", "BBB"]
+    assert _column(table, 8)[-1] == "—"
+
+
+def test_symbol_column_sorts_case_insensitively_ascending_first(qtbot) -> None:
+    # Text columns default to ascending and ignore case.
+    table = _make_table(
+        qtbot, [_sort_row("bbb", "1", "1"), _sort_row("AAA", "1", "2"), _sort_row("Ccc", "1", "3")]
+    )
+    table.horizontalHeader().sectionClicked.emit(0)  # Symbol
+    assert _column(table, 0) == ["AAA", "bbb", "Ccc"]
+
+
+def test_sort_is_stable_for_ties(qtbot) -> None:
+    # Equal sort keys preserve the input order (Python's sort is stable).
+    rows = [
+        _sort_row("FIRST", "1", "100"),
+        _sort_row("SECOND", "1", "100"),
+        _sort_row("THIRD", "1", "100"),
+    ]
+    table = _make_table(qtbot, rows)
+    table.horizontalHeader().sectionClicked.emit(5)  # Market Value, all equal
+    assert _column(table, 0) == ["FIRST", "SECOND", "THIRD"]
+
+
 def test_chart_selector_switches_independently(qtbot) -> None:
     window = _window(qtbot)
     left = window.dashboard.left_chart

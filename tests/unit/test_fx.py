@@ -64,3 +64,29 @@ def test_convert_quantizes_to_two_places() -> None:
     result = convert(Money.of("10", USD), CAD, PROVIDER)
     assert result.amount == Decimal("13.50")
     assert result.amount.as_tuple().exponent == -2
+
+
+def test_convert_negative_amount() -> None:
+    # A negative balance (e.g. a margin debit) converts and keeps its sign.
+    result = convert(Money.of("-100", USD), CAD, PROVIDER)
+    assert result == Money.of("-135.00", CAD)
+
+
+def test_convert_rounds_sub_cent_with_bankers() -> None:
+    # 0.01 USD * 1.35 = 0.0135 -> 0.01 (third decimal 3 rounds down).
+    assert convert(Money.of("0.01", USD), CAD, PROVIDER).amount == Decimal("0.01")
+
+
+def test_convert_round_trip_reflects_rate_asymmetry() -> None:
+    # 1.35 and 0.74 are not exact inverses, so a round-trip is lossy by design.
+    cad = convert(Money.of("100", USD), CAD, PROVIDER)
+    back = convert(cad, USD, PROVIDER)
+    assert back == Money.of("99.90", USD)  # 135.00 * 0.74
+
+
+def test_missing_inverse_rate_is_not_auto_derived() -> None:
+    # Only USD->CAD is in the table; the reverse must be supplied explicitly.
+    one_way = StaticFxProvider(rates={(USD, CAD): Decimal("1.35")})
+    assert one_way.get_rate(USD, CAD) == Decimal("1.35")
+    with pytest.raises(FxRateUnavailableError, match="CAD->USD"):
+        one_way.get_rate(CAD, USD)

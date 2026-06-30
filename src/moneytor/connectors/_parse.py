@@ -22,11 +22,18 @@ from .errors import FetchError
 
 
 def to_decimal(value: Any, where: str) -> Decimal:
-    """Coerce a JSON number/string to ``Decimal`` (no float path)."""
+    """Coerce a JSON number/string to ``Decimal`` (no float path).
+
+    Rejects non-finite values (``NaN``/``Infinity``): they parse as valid
+    ``Decimal`` objects but would silently poison every downstream sum.
+    """
     try:
-        return Decimal(str(value))
+        result = Decimal(str(value))
+        if not result.is_finite():
+            raise InvalidOperation
     except (InvalidOperation, TypeError) as exc:
         raise FetchError(f"Invalid number at {where}: {value!r}.") from exc
+    return result
 
 
 def to_currency(value: Any, where: str) -> Currency:

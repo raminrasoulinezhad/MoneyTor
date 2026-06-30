@@ -158,3 +158,76 @@ def test_unit_price_in_native_currency_with_sub_cent_precision() -> None:
     # Unrounded Decimal kept on the model; formatted to 2 places for the table.
     assert row.unit_price_native.amount == Decimal("100") / Decimal("3")
     assert row.unit_price_text == "$33.33 USD"
+
+
+# --------------------------------------------------------------------------- #
+# Edge cases for the numbers shown to users
+# --------------------------------------------------------------------------- #
+
+
+def test_empty_portfolio_renders_zeroed_kpis_without_crashing() -> None:
+    # The yield computation guards against division by zero (total == 0).
+    vm = build_dashboard_view_model(build_snapshot((), CAD, PROVIDER), PROVIDER)
+    assert len(vm.kpis) == 6
+    assert vm.kpis[0].value == "$0.00"  # Total Portfolio Value
+    assert vm.kpis[1].value == "$0.00"  # dividends
+    assert "0.0% yield" in vm.kpis[1].subtitle  # the else-branch, not a ZeroDivisionError
+    assert vm.kpis[5].value == "—"  # Top Position: no holdings
+    assert vm.kpis[5].subtitle == "no holdings"
+    assert vm.rows == ()
+
+
+def _single_holding_vm(**holding_kwargs):
+    from moneytor.domain import Account, AccountType, AssetClass, Holding, Institution, Money
+
+    base = Holding(
+        symbol="AAA",
+        exchange="NYSE",
+        asset_class=AssetClass.EQUITY,
+        quantity=Decimal("2"),
+        book_value=Money.of("100", USD),
+        market_value=Money.of("300", USD),
+    )
+    from dataclasses import replace
+
+    holding = replace(base, **holding_kwargs)
+    account = Account(
+        id="a",
+        person_id="p",
+        institution=Institution.QUESTRADE,
+        account_type=AccountType.MARGIN,
+        cash=Money.zero(USD),
+        holdings=(holding,),
+    )
+    people = (Person(id="p", name="P", accounts=(account,)),)
+    return build_dashboard_view_model(build_snapshot(people, CAD, PROVIDER), PROVIDER)
+
+
+def test_high_52w_pct_is_none_when_high_is_zero() -> None:
+    from moneytor.domain import Money
+
+    row = _single_holding_vm(high_52w=Money.of("0", USD)).rows[0]
+    assert row.high_52w_pct is None
+    assert row.high_52w_text == "—"
+
+
+def test_unit_price_is_none_for_zero_quantity() -> None:
+    from moneytor.domain import Money
+
+    row = _single_holding_vm(quantity=Decimal("0"), market_value=Money.of("0", USD)).rows[0]
+    assert row.unit_price_native is None
+    assert row.unit_price_text == "—"
+
+
+def test_allocation_pct_rounds_to_one_decimal() -> None:
+    from moneytor.domain import Money
+    from moneytor.ui.viewmodels import HoldingRow
+
+    row = HoldingRow(
+        symbol="X",
+        asset_class="equity",
+        quantity=Decimal("1"),
+        value=Money.of("1", CAD),
+        allocation=Decimal("0.001234"),  # 0.1234% -> "0.1%"
+    )
+    assert row.allocation_pct == "0.1%"

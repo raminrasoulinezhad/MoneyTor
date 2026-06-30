@@ -10,6 +10,8 @@ from __future__ import annotations
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
+
 from moneytor.aggregation import build_snapshot
 from moneytor.connectors import load_accounts
 from moneytor.domain import Currency, Person
@@ -95,3 +97,65 @@ def test_empty_portfolio_reports_cleanly() -> None:
     md = render_markdown(report)
     assert "## Holdings" in md
     assert render_pdf(report).startswith(b"%PDF")
+
+
+# --------------------------------------------------------------------------- #
+# Reconciliation — the report's numbers must add up
+# --------------------------------------------------------------------------- #
+
+
+def test_report_total_reconciles_to_people_and_accounts() -> None:
+    from moneytor.domain import Money
+
+    report = _report()
+    # Total equals the sum of person values...
+    people_sum = sum((p.value for p in report.people), Money.zero(CAD))
+    assert report.total_value == people_sum.quantize()
+    # ...and each person's value equals the sum of their account values.
+    for person in report.people:
+        accounts_sum = sum((a.value for a in person.accounts), Money.zero(CAD))
+        assert person.value == accounts_sum.quantize()
+
+
+def test_report_total_matches_known_fixture_value() -> None:
+    from moneytor.domain import Money
+
+    # Same expectation as the aggregation suite: the fixture totals 9489.01 CAD.
+    assert _report().total_value == Money.of("9489.01", CAD)
+
+
+def test_report_allocations_sum_to_one() -> None:
+    allocations = [h.allocation for h in _report().holdings]
+    assert sum(allocations) == pytest.approx(Decimal("1"), abs=Decimal("0.001"))
+
+
+# --------------------------------------------------------------------------- #
+# Rendered content accuracy (not just structure)
+# --------------------------------------------------------------------------- #
+
+
+def test_markdown_shows_computed_total_and_holding_numbers() -> None:
+    md = render_markdown(_report())
+    assert "**Total value:** $9,489.01 CAD" in md
+    # VFV: 25 shares, $3,100.00 CAD, the largest position.
+    assert "| VFV |" in md
+    assert "| 25 " in md
+    assert "$3,100.00 CAD" in md
+
+
+def test_pdf_handles_non_latin1_names_without_crashing() -> None:
+    from dataclasses import replace
+
+    from moneytor.connectors import load_accounts
+    from moneytor.domain import Person
+
+    accounts = load_accounts(FIXTURE)
+    # Inject a holding name with non-latin-1 characters (em dash, euro sign).
+    first = accounts[0]
+    renamed = replace(first.holdings[0], name="Açao — Empresa €uro • Ω")
+    patched = replace(first, holdings=(renamed, *first.holdings[1:]))
+    people = (Person(id="ramin", name="Ramin", accounts=(patched, *accounts[1:])),)
+    report = build_report(build_snapshot(people, CAD, PROVIDER), PROVIDER)
+    pdf = render_pdf(report)
+    assert pdf.startswith(b"%PDF")
+    assert pdf.rstrip().endswith(b"%%EOF")

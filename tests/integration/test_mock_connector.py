@@ -79,6 +79,63 @@ def test_missing_fixture_file_raises_fetch_error(tmp_path: Path) -> None:
         load_accounts(tmp_path / "nope.json")
 
 
+def test_non_list_json_root_raises_fetch_error(tmp_path: Path) -> None:
+    bad = tmp_path / "obj.json"
+    bad.write_text('{"id": "x"}', encoding="utf-8")  # object, not an array
+    with pytest.raises(FetchError, match="must contain a JSON array"):
+        load_accounts(bad)
+
+
+def test_empty_payload_returns_no_accounts() -> None:
+    assert accounts_from_payload([]) == ()
+
+
+def test_absent_dividend_yield_parses_as_none() -> None:
+    accounts = load_accounts(FIXTURE)
+    shop = accounts[0].holdings[0]  # SHOP has no dividend_yield in the fixture
+    vfv = accounts[0].holdings[1]  # VFV declares 0.012
+    assert shop.dividend_yield is None
+    assert vfv.dividend_yield == Decimal("0.012")
+
+
+def test_zero_quantity_holding_parses() -> None:
+    payload = [
+        {
+            "id": "a",
+            "person_id": "p",
+            "institution": "questrade",
+            "account_type": "tfsa",
+            "cash": {"amount": "0", "currency": "CAD"},
+            "holdings": [
+                {
+                    "symbol": "ZZZ",
+                    "exchange": "TSX",
+                    "asset_class": "equity",
+                    "quantity": "0",
+                    "book_value": {"amount": "0", "currency": "CAD"},
+                    "market_value": {"amount": "0", "currency": "CAD"},
+                }
+            ],
+        }
+    ]
+    holding = accounts_from_payload(payload)[0].holdings[0]
+    assert holding.quantity == Decimal("0")
+
+
+def test_malformed_money_node_raises_fetch_error() -> None:
+    payload = [
+        {
+            "id": "a",
+            "person_id": "p",
+            "institution": "questrade",
+            "account_type": "tfsa",
+            "cash": {"currency": "CAD"},  # missing "amount"
+        }
+    ]
+    with pytest.raises(FetchError):
+        accounts_from_payload(payload)
+
+
 # --------------------------------------------------------------------------- #
 # Connector protocol / lifecycle
 # --------------------------------------------------------------------------- #
