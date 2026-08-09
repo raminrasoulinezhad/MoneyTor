@@ -7,7 +7,7 @@
 - **Multi-Person & Multi-Account Support:** Track financial portfolios for an entire family. Each person can have unique credentials for supported institutions, with multiple underlying accounts (e.g., TFSA, RRSP, Spousal RRSP, Margin, Managed accounts).
 - **Supported Institutions:** Wealthsimple and Questrade (designed to be easily extendable to other Canadian institutions).
 - **Aggregation Engine:** Normalizes disparate brokerage data. Merges identical assets across different stock exchanges into unified holdings, utilizing automated or file-based mapping and handling CAD/USD currency conversions dynamically.
-- **Reporting & Analytics:** Generates multi-currency portfolio analysis, interactive data visualizations (including portfolio distribution pie charts), and exports reports in PDF and Markdown formats. 
+- **Reporting & Analytics:** Generates multi-currency portfolio analysis, interactive data visualizations (including portfolio distribution pie charts), and exports reports in PDF and Markdown formats.
 
 ---
 
@@ -29,7 +29,7 @@ To ensure the interface looks modern, premium, and clean, all UI code must adher
 - **Accent Colors:** Use a refined primary color (e.g., emerald green or deep indigo) for interactive states, semantic green for positive daily returns, and a soft red for losses.
 
 ### 2. Layout & Typography
-- **The Cockpit Layout:** 
+- **The Cockpit Layout:**
   - **Left Sidebar:** Collapsible panel containing the family checklist (toggle individuals on/off) and account tree-view (toggle TFSA, RRSP, etc.).
   - **Main Dashboard:** Dynamic grid layout featuring high-level KPI cards at the top, a large main chart section in the center, and a detailed holdings table at the bottom.
 - **Spacing & Radii:** Maintain generous padding (16px to 24px) between elements to prevent data crowding. All cards, buttons, and modal windows must have elegant rounded corners (8px to 12px border-radius).

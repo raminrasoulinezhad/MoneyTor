@@ -104,9 +104,7 @@ _BALANCES = {
     }
 }
 
-_MARKET_DATA = {
-    "data": {"security": {"id": "sec-veqt", "fundamentals": {"high52Week": "40.00"}}}
-}
+_MARKET_DATA = {"data": {"security": {"id": "sec-veqt", "fundamentals": {"high52Week": "40.00"}}}}
 
 _GRAPHQL_RESPONSES = {
     "Accounts": _ACCOUNTS,

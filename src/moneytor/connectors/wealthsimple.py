@@ -295,9 +295,7 @@ class WealthsimpleConnector:
 
     def _positions_by_account(self, identity: str) -> dict[str, list[Holding]]:
         nodes = self._position_nodes(identity)
-        security_ids = sorted(
-            {sid for node in nodes if (sid := _security_id(node))}
-        )
+        security_ids = sorted({sid for node in nodes if (sid := _security_id(node))})
         highs = self._high_52w_by_security(security_ids)
 
         grouped: dict[str, list[Holding]] = {}
