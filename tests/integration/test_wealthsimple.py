@@ -13,6 +13,7 @@ validated-but-unofficial API shapes.
 
 from __future__ import annotations
 
+import copy
 import json
 from decimal import Decimal
 from pathlib import Path
@@ -267,6 +268,83 @@ def test_maps_positions_and_cash(tmp_path: Path) -> None:
     assert veqt.quantity == Decimal("20")
     assert veqt.book_value == Money.of("600.00", Currency.CAD)
     assert veqt.market_value == Money.of("720.00", Currency.CAD)
+
+
+def _handler_with(overrides: dict[str, object]):
+    """A data handler serving the standard payloads with some replaced."""
+    responses = {**_GRAPHQL_RESPONSES, **overrides}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/oauth/v2/token"):
+            return httpx.Response(200, json=_TOKEN_OK)
+        if request.url.path.endswith("/oauth/v2/token/info"):
+            return httpx.Response(200, json=_IDENTITY)
+        if request.url.path.endswith("/graphql"):
+            operation = json.loads(request.content)["operationName"]
+            return httpx.Response(200, json=responses[operation])
+        return httpx.Response(404)
+
+    return handler
+
+
+def _positions_with_security(security: object) -> dict:
+    """The standard Positions payload with the position's `security` replaced."""
+    payload = copy.deepcopy(_POSITIONS)
+    node = payload["data"]["identity"]["financials"]["current"]["positions"]["edges"][0]["node"]
+    node["security"] = security
+    return payload
+
+
+def _fetch_one(tmp_path: Path, overrides: dict[str, object]):
+    connector = _connector(_handler_with(overrides), tmp_path)
+    connector.authenticate()
+    return connector.fetch_accounts()[0].holdings[0]
+
+
+def test_null_security_degrades_instead_of_crashing(tmp_path: Path) -> None:
+    # Wealthsimple's schema makes every nested object nullable. A null security
+    # must leave a usable placeholder holding rather than raise.
+    holding = _fetch_one(tmp_path, {"Positions": _positions_with_security(None)})
+
+    assert holding.symbol == "UNKNOWN"
+    assert holding.name == ""
+    assert holding.exchange == ""
+    assert holding.asset_class is AssetClass.OTHER
+    # The money that *was* present still survives.
+    assert holding.market_value == Money.of("720.00", Currency.CAD)
+
+
+def test_null_stock_falls_back_to_the_security_id(tmp_path: Path) -> None:
+    security = {"id": "sec-veqt", "securityType": "ETF", "stock": None}
+    holding = _fetch_one(tmp_path, {"Positions": _positions_with_security(security)})
+
+    assert holding.symbol == "sec-veqt"  # no stock block, so the id identifies it
+    assert holding.name == ""
+    assert holding.asset_class is AssetClass.ETF  # read off the security, not the stock
+
+
+@pytest.mark.parametrize(
+    "market_data",
+    [
+        {"data": {"security": None}},
+        {"data": {"security": {"id": "sec-veqt", "fundamentals": None}}},
+        {"data": {"security": {"id": "sec-veqt", "fundamentals": {"high52Week": None}}}},
+        {"data": {}},
+        # Not just null — a nested field of the *wrong type* must degrade too.
+        # This one used to raise AttributeError straight through the fetch,
+        # because `fundamentals or {}` keeps a truthy non-dict and AttributeError
+        # is not a ConnectorError, so the best-effort handler never caught it.
+        {"data": {"security": {"id": "sec-veqt", "fundamentals": "unavailable"}}},
+    ],
+)
+def test_missing_fundamentals_leave_the_52_week_high_unset(
+    tmp_path: Path, market_data: dict
+) -> None:
+    # 52-week high is best-effort: absent means the column shows "—", not a crash.
+    holding = _fetch_one(tmp_path, {"SecurityMarketData": market_data})
+
+    assert holding.high_52w is None
+    assert holding.symbol == "VEQT"  # everything else still maps
 
 
 def test_graphql_errors_raise_fetch_error(tmp_path: Path) -> None:

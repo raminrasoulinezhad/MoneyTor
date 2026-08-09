@@ -335,9 +335,7 @@ class WealthsimpleConnector:
                 data = self._graphql("SecurityMarketData", _MARKET_DATA_QUERY, {"id": sid})
             except ConnectorError:
                 continue
-            security = data.get("security") if isinstance(data.get("security"), dict) else {}
-            fundamentals = security.get("fundamentals") or {}
-            value = fundamentals.get("high52Week")
+            value = _nested(data, "security", "fundamentals").get("high52Week")
             if value is not None:
                 with suppress(FetchError):
                     highs[sid] = to_decimal(value, "fundamentals.high52Week")
@@ -377,8 +375,8 @@ class WealthsimpleConnector:
         )
 
     def _map_position(self, node: dict[str, Any], highs: dict[str, Decimal]) -> Holding:
-        security = node.get("security") if isinstance(node.get("security"), dict) else {}
-        stock = security.get("stock") if isinstance(security.get("stock"), dict) else {}
+        security = _nested(node, "security")
+        stock = _nested(security, "stock")
         symbol = stock.get("symbol") or security.get("id") or "UNKNOWN"
         market_value = _money_or_zero(node.get("totalValue"), "position.totalValue")
         high = highs.get(_security_id(node))
@@ -491,5 +489,4 @@ def _money_or_zero(node: Any, where: str) -> Money:
 
 
 def _security_id(node: dict[str, Any]) -> str:
-    security = node.get("security") if isinstance(node.get("security"), dict) else {}
-    return str(security.get("id") or "")
+    return str(_nested(node, "security").get("id") or "")

@@ -11,13 +11,15 @@ and the full suite is green.
 stops a push that breaks the suite, lint, or types. Add a workflow running
 `pytest`, `ruff`, and `mypy` on push and PR.
 
-**Clear the 11 mypy errors.** `uv run mypy src` is not clean:
+**Clear the last 4 mypy errors.** `uv run mypy src` is down from 11 but not
+clean. All four are one-liners:
 
-| File | Count | What |
-| --- | --- | --- |
-| `connectors/wealthsimple.py` | 7 | `.get()` on a value mypy sees as possibly `None` — needs guards on the GraphQL payload |
-| `ui/widgets/holdings_table.py` | 1 | `sorted(key=...)` returns `object`; the key needs a comparable type |
-| `fx/live.py`, `ui/main_window.py`, `ui/widgets/lock_screen.py` | 3 | Qt event handlers missing a parameter annotation |
+| File | What |
+| --- | --- |
+| `ui/widgets/holdings_table.py` | `sorted(key=...)` returns `object`; the key needs a comparable type |
+| `fx/live.py`, `ui/main_window.py`, `ui/widgets/lock_screen.py` | Qt event handlers missing a parameter annotation |
+
+Worth doing before wiring mypy into CI, so the gate can start green.
 
 **Test the macOS and Windows autostart backends on real machines.** Both are
 unit-tested against a temp directory and a fake registry, but neither has ever
