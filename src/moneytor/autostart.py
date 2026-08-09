@@ -82,7 +82,10 @@ class Autostart:
 
     def set_enabled(self, enabled: bool) -> None:
         """Enable or disable, whichever ``enabled`` asks for."""
-        self.enable() if enabled else self.disable()
+        if enabled:
+            self.enable()
+        else:
+            self.disable()
 
 
 class LinuxAutostart(Autostart):
@@ -198,7 +201,14 @@ _WIN_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
 
 class _WinRegistry:
-    """Thin ``winreg`` wrapper over the per-user Run key (injectable in tests)."""
+    """Thin ``winreg`` wrapper over the per-user Run key (injectable in tests).
+
+    ``winreg`` is imported inside each method rather than at module scope: it
+    only exists on Windows, so a top-level import would break the module for
+    every other platform.
+    """
+
+    # pylint: disable=import-outside-toplevel,import-error  # Windows-only stdlib
 
     def read(self, name: str) -> str | None:
         import winreg

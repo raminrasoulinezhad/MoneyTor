@@ -16,9 +16,6 @@ dependencies = [
     "python-dotenv>=1.0",
 ]
 
-[project.optional-dependencies]
-# Runtime deps are added per-phase (see IMPLEMENTATION_PLAN.md) to avoid front-loading.
-
 [dependency-groups]
 dev = [
     "pytest>=8.0",

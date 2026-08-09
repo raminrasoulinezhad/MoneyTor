@@ -57,7 +57,12 @@ _LAUNCH_NOTE = "MoneyTor will start automatically the next time you sign in to t
 class MainWindow(QMainWindow):
     """Cockpit window. Renders people via the dashboard, filtered by sidebar."""
 
-    def __init__(
+    # The cockpit composes a dozen collaborating widgets plus the data, theme,
+    # lock and autostart state they are driven from; splitting that across
+    # smaller objects would only move the wiring somewhere less obvious.
+    # pylint: disable=too-many-instance-attributes
+
+    def __init__(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         people: tuple[Person, ...],
         provider: FxProvider,
@@ -94,7 +99,16 @@ class MainWindow(QMainWindow):
         self._settings_dialog: SettingsDialog | None = None
 
         self._build_toolbar()
+        self._build_body()
 
+        find_shortcut = QShortcut(QKeySequence.StandardKey.Find, self)
+        find_shortcut.activated.connect(self.dashboard.focus_search)
+
+        self.apply_theme(theme)
+        self.set_people(people)
+
+    def _build_body(self) -> None:
+        """Assemble the central widget: banner, progress bar, then the columns."""
         central = QWidget()
         central.setObjectName("Root")
         outer = QVBoxLayout(central)
@@ -130,12 +144,6 @@ class MainWindow(QMainWindow):
         body.addWidget(self.dashboard, stretch=1)
         outer.addLayout(body, stretch=1)
         self.setCentralWidget(central)
-
-        find_shortcut = QShortcut(QKeySequence.StandardKey.Find, self)
-        find_shortcut.activated.connect(self.dashboard.focus_search)
-
-        self.apply_theme(theme)
-        self.set_people(people)
 
     # -- public API --------------------------------------------------------- #
 
