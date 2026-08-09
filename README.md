@@ -155,3 +155,11 @@ To remove it later: `./scripts/install-desktop.sh --uninstall`.
 - **A person won't load** — make sure that person has *either* a Questrade
   refresh token *or* both a Wealthsimple email and password (not just one of the
   two).
+
+---
+
+## License
+
+MoneyTor is licensed under the [Apache License, Version 2.0](LICENSE).
+Copyright (c) 2026 Seyedramin Rasoulinezhad. See [NOTICE](NOTICE) for the
+attribution notice that must accompany redistributions.
