@@ -12,7 +12,16 @@ import moneytor
 
 
 def test_version_is_exposed() -> None:
-    assert moneytor.__version__ == "0.1.0"
+    assert moneytor.__version__ == "1.1.1"
+
+
+def test_package_metadata_version_matches_dunder_version() -> None:
+    # pyproject declares the version dynamic and reads it from __init__.py, so
+    # these can only disagree if that wiring breaks. They did drift once —
+    # 0.1.0 in the window title against 1.0.0 in pyproject — so pin them.
+    from importlib.metadata import version
+
+    assert version("moneytor") == moneytor.__version__
 
 
 def test_entrypoint_is_importable() -> None:

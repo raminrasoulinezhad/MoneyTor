@@ -414,7 +414,6 @@ wheels = [
 
 [[package]]
 name = "moneytor"
-version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "fpdf2" },

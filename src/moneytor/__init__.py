@@ -6,4 +6,8 @@
 
 """MoneyTor — personal & family financial aggregation cockpit."""
 
-__version__ = "0.1.0"
+# The single source of truth for the app version: pyproject reads it from here
+# (see [tool.hatch.version]), so the window title, the built wheel, and the
+# lockfile cannot drift apart again. Bump per semver — major for a breaking
+# change, minor for a new feature, patch for a fix.
+__version__ = "1.1.1"
