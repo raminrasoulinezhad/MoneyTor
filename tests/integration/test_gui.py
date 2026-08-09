@@ -19,6 +19,7 @@ import pytest
 
 pytest.importorskip("pytestqt")
 
+from moneytor.autostart import AutostartError
 from moneytor.config.secret import Secret
 from moneytor.config.settings import PersonCredentials, Settings
 from moneytor.connectors import load_accounts
@@ -42,8 +43,39 @@ def _people() -> tuple[Person, ...]:
     return (Person(id="ramin", name="Ramin", accounts=load_accounts(FIXTURE)),)
 
 
-def _window(qtbot) -> MainWindow:
-    window = MainWindow(people=_people(), provider=PROVIDER, display_currency=CAD)
+class _FakeAutostart:
+    """In-memory Autostart backend, so tests never touch the real login config."""
+
+    def __init__(self, supported: bool = True, fail_with: str | None = None) -> None:
+        self.supported = supported
+        self.reason = "Launch at login is not available on this platform."
+        self._enabled = False
+        self._fail_with = fail_with
+
+    def is_enabled(self) -> bool:
+        return self._enabled
+
+    def enable(self) -> None:
+        if self._fail_with is not None:
+            raise AutostartError(self._fail_with)
+        self._enabled = True
+
+    def disable(self) -> None:
+        if self._fail_with is not None:
+            raise AutostartError(self._fail_with)
+        self._enabled = False
+
+    def set_enabled(self, enabled: bool) -> None:
+        self.enable() if enabled else self.disable()
+
+
+def _window(qtbot, autostart=None) -> MainWindow:
+    window = MainWindow(
+        people=_people(),
+        provider=PROVIDER,
+        display_currency=CAD,
+        autostart=autostart if autostart is not None else _FakeAutostart(),
+    )
     qtbot.addWidget(window)
     return window
 
@@ -399,24 +431,25 @@ def test_exit_private_mode_requires_password(qtbot, monkeypatch) -> None:
     # Configure the gate password (as the launch lock would).
     window.lock("hunter2")
     window._dismiss_lock()
+    dialog = window.open_settings()
     window.set_private(True)
     # The wrong-password warning is modal; stub it so the test never blocks.
     monkeypatch.setattr(mw.QMessageBox, "warning", lambda *a, **k: None)
 
-    # Wrong password: stays private.
+    # Wrong password: stays private, and the checkbox snaps back to ticked.
     monkeypatch.setattr(mw.QInputDialog, "getText", lambda *a, **k: ("nope", True))
-    window._on_private_clicked()
+    window._on_private_requested(False)
     assert window.private_mode is True
-    assert window._private_button.isChecked()
+    assert dialog.private_checkbox.isChecked()
 
     # Cancelled dialog: stays private.
     monkeypatch.setattr(mw.QInputDialog, "getText", lambda *a, **k: ("", False))
-    window._on_private_clicked()
+    window._on_private_requested(False)
     assert window.private_mode is True
 
     # Correct password: reveals.
     monkeypatch.setattr(mw.QInputDialog, "getText", lambda *a, **k: ("hunter2", True))
-    window._on_private_clicked()
+    window._on_private_requested(False)
     assert window.private_mode is False
     assert window.kpi_panel.kpi_cards[0].value_text != _MASK
 
@@ -426,8 +459,156 @@ def test_enter_private_mode_needs_no_password(qtbot) -> None:
     window = _window(qtbot)
     window.lock("hunter2")
     window._dismiss_lock()
-    window._on_private_clicked()
+    window._on_private_requested(True)
     assert window.private_mode is True
+
+
+# --------------------------------------------------------------------------- #
+# Settings dialog
+# --------------------------------------------------------------------------- #
+
+
+def test_toolbar_keeps_only_navigation_controls(qtbot) -> None:
+    from PySide6.QtWidgets import QPushButton, QToolBar
+
+    # Private mode / Toggle theme / Export moved into Settings, so the toolbar
+    # is down to Refresh, Log out, and the gear.
+    window = _window(qtbot)
+    toolbar = window.findChild(QToolBar)
+    labels = {b.text() for b in toolbar.findChildren(QPushButton)}
+    assert labels == {"Refresh", "Log out", "⚙  Settings"}
+
+
+def test_settings_dialog_opens_and_is_reused(qtbot) -> None:
+    window = _window(qtbot)
+    assert window._settings_dialog is None  # built lazily on first open
+
+    dialog = window.open_settings()
+    qtbot.addWidget(dialog)
+    assert dialog.isVisible()
+    assert dialog.isModal()
+    # Re-opening returns the same instance rather than stacking dialogs.
+    assert window.open_settings() is dialog
+
+
+def test_settings_dialog_toggles_theme(qtbot) -> None:
+    window = _window(qtbot)
+    dialog = window.open_settings()
+    qtbot.addWidget(dialog)
+    assert window.theme is Theme.DARK
+    assert dialog.theme_button.text() == "Switch to Light"
+
+    dialog.theme_button.click()
+
+    assert window.theme is Theme.LIGHT
+    # The dialog re-renders: it now offers the way back.
+    assert dialog.theme_button.text() == "Switch to Dark"
+
+
+def test_settings_dialog_toggles_private_mode(qtbot) -> None:
+    window = _window(qtbot)
+    dialog = window.open_settings()
+    qtbot.addWidget(dialog)
+    assert not dialog.private_checkbox.isChecked()
+
+    dialog.private_checkbox.setChecked(True)
+
+    assert window.private_mode is True
+    assert window.kpi_panel.kpi_cards[0].value_text == _MASK
+
+    # No password configured, so revealing is free.
+    dialog.private_checkbox.setChecked(False)
+    assert window.private_mode is False
+
+
+def test_settings_dialog_reflects_private_mode_set_elsewhere(qtbot) -> None:
+    window = _window(qtbot)
+    dialog = window.open_settings()
+    qtbot.addWidget(dialog)
+    window.set_private(True)
+    assert dialog.private_checkbox.isChecked()
+
+
+def test_settings_dialog_exports_report(qtbot, monkeypatch, tmp_path) -> None:
+    from moneytor.ui import main_window as mw
+
+    window = _window(qtbot)
+    dialog = window.open_settings()
+    qtbot.addWidget(dialog)
+    target = tmp_path / "report.pdf"
+    monkeypatch.setattr(mw.QFileDialog, "getSaveFileName", lambda *a, **k: (str(target), ""))
+    monkeypatch.setattr(mw.QMessageBox, "information", lambda *a, **k: None)
+
+    dialog.export_button.click()
+
+    assert target.exists() and target.read_bytes().startswith(b"%PDF")
+    assert target.with_suffix(".md").exists()
+
+
+def test_settings_dialog_cancelled_export_writes_nothing(qtbot, monkeypatch, tmp_path) -> None:
+    from moneytor.ui import main_window as mw
+
+    window = _window(qtbot)
+    dialog = window.open_settings()
+    qtbot.addWidget(dialog)
+    monkeypatch.setattr(mw.QFileDialog, "getSaveFileName", lambda *a, **k: ("", ""))
+
+    dialog.export_button.click()
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_settings_dialog_toggles_launch_at_login(qtbot) -> None:
+    autostart = _FakeAutostart()
+    window = _window(qtbot, autostart=autostart)
+    dialog = window.open_settings()
+    qtbot.addWidget(dialog)
+    assert dialog.launch_checkbox.isEnabled()
+    assert not dialog.launch_checkbox.isChecked()
+
+    dialog.launch_checkbox.setChecked(True)
+    assert autostart.is_enabled() is True
+
+    dialog.launch_checkbox.setChecked(False)
+    assert autostart.is_enabled() is False
+
+
+def test_settings_dialog_shows_autostart_failure_and_reverts(qtbot) -> None:
+    autostart = _FakeAutostart(fail_with="Could not write /nope/moneytor.desktop")
+    window = _window(qtbot, autostart=autostart)
+    dialog = window.open_settings()
+    qtbot.addWidget(dialog)
+
+    dialog.launch_checkbox.setChecked(True)
+
+    # The error is shown inline and the checkbox falls back to the real state.
+    assert dialog._error.isVisible()
+    assert "Could not write" in dialog._error.text()
+    assert not dialog.launch_checkbox.isChecked()
+
+
+def test_settings_dialog_disables_launch_toggle_when_unsupported(qtbot) -> None:
+    autostart = _FakeAutostart(supported=False)
+    window = _window(qtbot, autostart=autostart)
+    dialog = window.open_settings()
+    qtbot.addWidget(dialog)
+
+    assert not dialog.launch_checkbox.isEnabled()
+    assert dialog._launch_note.text() == autostart.reason
+
+
+def test_locking_hides_the_settings_dialog(qtbot) -> None:
+    # The dialog is application-modal; leaving it up would let a locked-out user
+    # keep changing settings over the password gate.
+    window = _window(qtbot)
+    window.show()
+    dialog = window.open_settings()
+    qtbot.addWidget(dialog)
+    assert dialog.isVisible()
+
+    window.lock("hunter2")
+
+    assert not dialog.isVisible()
 
 
 def test_fetch_worker_reports_success(qtbot) -> None:

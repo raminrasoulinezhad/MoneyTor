@@ -4,7 +4,7 @@
 # except in compliance with the License. A copy ships in LICENSE, or see
 # http://www.apache.org/licenses/LICENSE-2.0. Provided "as is", without warranty.
 
-"""The application main window: sidebar + dashboard + theme toggle + refresh."""
+"""The application main window: sidebar + dashboard + settings + refresh."""
 
 from __future__ import annotations
 
@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 
 from moneytor import __version__
 from moneytor.aggregation import build_snapshot
+from moneytor.autostart import Autostart, AutostartError, autostart_for
 from moneytor.connectors.errors import ConnectorError
 from moneytor.domain.enums import Currency
 from moneytor.domain.models import Person
@@ -42,11 +43,15 @@ from moneytor.ui.widgets.banner import ErrorBanner
 from moneytor.ui.widgets.kpi_panel import KpiPanel
 from moneytor.ui.widgets.lock_screen import LockScreen
 from moneytor.ui.widgets.progress_bar import FetchProgressBar
+from moneytor.ui.widgets.settings_dialog import SettingsDialog
 from moneytor.ui.widgets.sidebar import Sidebar
 from moneytor.ui.workers import FetchWorker
 
 PeopleLoader = Callable[[], tuple[Person, ...]]
 Clock = Callable[[], str]
+
+_THEME_NAMES = {Theme.DARK: "Dark", Theme.LIGHT: "Light"}
+_LAUNCH_NOTE = "MoneyTor will start automatically the next time you sign in to this computer."
 
 
 class MainWindow(QMainWindow):
@@ -60,6 +65,7 @@ class MainWindow(QMainWindow):
         theme: Theme = Theme.DARK,
         loader: PeopleLoader | None = None,
         clock: Clock | None = None,
+        autostart: Autostart | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -82,6 +88,10 @@ class MainWindow(QMainWindow):
         # Set the first time the window is locked; enables the Log out button.
         self._expected_password: str | None = None
         self._private = False
+        # Backend for the "open at login" toggle; injectable so tests never
+        # touch the real user session configuration.
+        self._autostart = autostart if autostart is not None else autostart_for()
+        self._settings_dialog: SettingsDialog | None = None
 
         self._build_toolbar()
 
@@ -138,6 +148,10 @@ class MainWindow(QMainWindow):
         """
         self._expected_password = expected_password
         self._logout_button.setVisible(True)
+        # The settings dialog is application-modal and would stay usable on top
+        # of the overlay, so locking must dismiss it.
+        if self._settings_dialog is not None:
+            self._settings_dialog.hide()
         overlay = LockScreen(expected_password, self)
         overlay.setGeometry(self.rect())
         overlay.unlocked.connect(self._dismiss_lock)
@@ -168,12 +182,27 @@ class MainWindow(QMainWindow):
         self._private = private
         self.kpi_panel.set_private(private)
         self.dashboard.set_private(private)
-        self._private_button.setChecked(private)
-        self._private_button.setText("Reveal values" if private else "Private mode")
+        self._sync_settings()
 
     @property
     def private_mode(self) -> bool:
         return self._private
+
+    def open_settings(self) -> SettingsDialog:
+        """Show the in-app settings dialog, building it on first use.
+
+        Returns the dialog so callers (and tests) can drive it. Reused across
+        opens so it keeps its position on screen.
+        """
+        if self._settings_dialog is None:
+            self._settings_dialog = self._build_settings_dialog()
+        dialog = self._settings_dialog
+        dialog.clear_error()
+        self._sync_settings()
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+        return dialog
 
     def _dismiss_lock(self) -> None:
         if self._lock_overlay is not None:
@@ -233,6 +262,11 @@ class MainWindow(QMainWindow):
         self._theme = theme
         self.setStyleSheet(stylesheet_for(theme))
         self.dashboard.set_theme_tokens(tokens_for(theme))
+        if self._settings_dialog is not None:
+            # A dialog is its own top-level window, so it does not inherit the
+            # main window's stylesheet; restyle it explicitly.
+            self._settings_dialog.setStyleSheet(stylesheet_for(theme))
+            self._sync_settings()  # the toggle now offers the way back
 
     def toggle_theme(self) -> None:
         """Switch between dark and light themes."""
@@ -256,28 +290,14 @@ class MainWindow(QMainWindow):
         refresh_button.clicked.connect(self.reload_data)
         toolbar.addWidget(refresh_button)
 
-        export_button = QPushButton("Export Report")
-        export_button.clicked.connect(self._on_export)
-        toolbar.addWidget(export_button)
-
-        self._theme_button = QPushButton("Toggle theme")
-        self._theme_button.clicked.connect(self.toggle_theme)
-        toolbar.addWidget(self._theme_button)
-
         self._updated_label = QLabel("")
         self._updated_label.setObjectName("CardSubtitle")
         toolbar.addWidget(self._updated_label)
 
-        # Push the Private mode / Log out buttons to the far right of the toolbar.
+        # Push the Log out / Settings buttons to the far right of the toolbar.
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         toolbar.addWidget(spacer)
-
-        # Hides absolute monetary values; revealing them requires the password.
-        self._private_button = QPushButton("Private mode")
-        self._private_button.setCheckable(True)
-        self._private_button.clicked.connect(self._on_private_clicked)
-        toolbar.addWidget(self._private_button)
 
         # Only meaningful when a password gate is configured; revealed by lock().
         self._logout_button = QPushButton("Log out")
@@ -285,44 +305,100 @@ class MainWindow(QMainWindow):
         self._logout_button.setVisible(False)
         toolbar.addWidget(self._logout_button)
 
+        # Top-right gear: private mode, theme, export, and start-at-login all
+        # live behind this one button.
+        self._settings_button = QPushButton("⚙  Settings")
+        self._settings_button.clicked.connect(self.open_settings)
+        toolbar.addWidget(self._settings_button)
+
         self.addToolBar(toolbar)
 
+    def _build_settings_dialog(self) -> SettingsDialog:
+        dialog = SettingsDialog(self)
+        dialog.setStyleSheet(stylesheet_for(self._theme))
+        dialog.privateModeRequested.connect(self._on_private_requested)
+        dialog.themeToggleRequested.connect(self.toggle_theme)
+        dialog.exportRequested.connect(self._on_export)
+        dialog.launchAtLoginRequested.connect(self._on_launch_at_login_requested)
+        return dialog
+
+    def _sync_settings(self) -> None:
+        """Push the window's current state into the settings dialog, if open."""
+        if self._settings_dialog is None:
+            return
+        other = Theme.LIGHT if self._theme is Theme.DARK else Theme.DARK
+        supported = self._autostart.supported
+        self._settings_dialog.sync(
+            private=self._private,
+            theme_name=_THEME_NAMES[self._theme],
+            other_theme_name=_THEME_NAMES[other],
+            launch_at_login=self._autostart.is_enabled(),
+            launch_supported=supported,
+            launch_note=_LAUNCH_NOTE if supported else self._autostart.reason,
+        )
+
+    def _on_launch_at_login_requested(self, enabled: bool) -> None:
+        assert self._settings_dialog is not None  # only the dialog emits this
+        self._settings_dialog.clear_error()
+        try:
+            self._autostart.set_enabled(enabled)
+        except AutostartError as exc:
+            self._settings_dialog.show_error(str(exc))
+        # Re-read from the OS either way, so the checkbox shows what is really
+        # registered rather than what was asked for.
+        self._sync_settings()
+
     def _on_export(self) -> None:
+        # Parent to the settings dialog while it is up: it is application-modal,
+        # so a file chooser parented to the window behind it would not accept input.
+        parent = self._modal_parent()
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export portfolio report", "moneytor-report.pdf", "PDF Files (*.pdf)"
+            parent, "Export portfolio report", "moneytor-report.pdf", "PDF Files (*.pdf)"
         )
         if not path:
             return
         try:
             markdown, pdf = self.export_report(path)
         except OSError as exc:
-            self.banner.show_message(f"Could not export report: {exc}")
+            self._report_error(f"Could not export report: {exc}")
             return
-        QMessageBox.information(self, "Report exported", f"Saved:\n{pdf}\n{markdown}")
+        QMessageBox.information(parent, "Report exported", f"Saved:\n{pdf}\n{markdown}")
+
+    def _modal_parent(self) -> QWidget:
+        """The widget to parent a nested dialog to (the settings dialog, if shown)."""
+        if self._settings_dialog is not None and self._settings_dialog.isVisible():
+            return self._settings_dialog
+        return self
+
+    def _report_error(self, message: str) -> None:
+        """Show ``message`` inline in settings when open, else in the banner."""
+        if self._settings_dialog is not None and self._settings_dialog.isVisible():
+            self._settings_dialog.show_error(message)
+            return
+        self.banner.show_message(message)
 
     def _on_selection_changed(self, account_ids: frozenset[str]) -> None:
         # Empty selection means "show everything".
         self._selected_ids = account_ids or None
         self.refresh()
 
-    def _on_private_clicked(self) -> None:
+    def _on_private_requested(self, private: bool) -> None:
         # Enabling private mode is free; revealing values requires the password.
-        if not self._private:
+        if private:
             self.set_private(True)
             return
         if self._verify_reveal_password():
             self.set_private(False)
         else:
-            # The checkable button toggled itself on click; keep it pressed since
-            # we are still private.
-            self._private_button.setChecked(True)
+            # Refused: re-render the dialog so its checkbox snaps back to ticked.
+            self._sync_settings()
 
     def _verify_reveal_password(self) -> bool:
         """Prompt for the password; True if it matches (or none is configured)."""
         if self._expected_password is None:
             return True
         entered, accepted = QInputDialog.getText(
-            self,
+            self._modal_parent(),
             "Exit private mode",
             "Enter your password to reveal values:",
             QLineEdit.EchoMode.Password,
@@ -331,7 +407,7 @@ class MainWindow(QMainWindow):
             return False
         if entered == self._expected_password:
             return True
-        QMessageBox.warning(self, "Private mode", "Incorrect password.")
+        QMessageBox.warning(self._modal_parent(), "Private mode", "Incorrect password.")
         return False
 
     def _on_progress(self, done: int, total: int, label: str) -> None:

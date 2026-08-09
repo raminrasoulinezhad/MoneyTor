@@ -63,6 +63,28 @@ def build_qss(t: ThemeTokens) -> str:
     #CardSubtitle {{ font-size: {t.font_size_label}px; color: {t.text_muted}; }}
     #Placeholder {{ color: {t.text_muted}; }}
 
+    /* Settings dialog */
+    #SettingsNote {{ font-size: {t.font_size_label}px; color: {t.text_muted}; }}
+    #SettingsError {{ color: {t.negative}; font-weight: 600; }}
+    /* An explicit box: the default indicator is near-invisible on the dark
+       surface, and these two checkboxes are the whole point of the panel. */
+    #SettingsDialog QCheckBox {{ spacing: 10px; font-weight: 600; }}
+    #SettingsDialog QCheckBox::indicator {{
+        width: 18px;
+        height: 18px;
+        border: 1px solid {t.border};
+        /* Not radius_sm: 8px on an 18px box rounds into a radio-button circle. */
+        border-radius: 4px;
+        background: {t.surface_alt};
+    }}
+    #SettingsDialog QCheckBox::indicator:hover {{ border: 1px solid {t.accent}; }}
+    #SettingsDialog QCheckBox::indicator:checked {{
+        background: {t.accent};
+        border: 1px solid {t.accent};
+    }}
+    #SettingsDialog QCheckBox:disabled {{ color: {t.text_muted}; }}
+    #SettingsDialog QCheckBox::indicator:disabled {{ background: {t.surface}; }}
+
     /* Inputs (search box, chart selector, dialog fields) */
     QLineEdit, QComboBox, QAbstractSpinBox {{
         background: {t.surface_alt};

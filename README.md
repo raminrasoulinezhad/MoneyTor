@@ -27,19 +27,44 @@ The dashboard puts everything on one screen:
 - **Holdings table** (bottom) — every position merged across accounts and
   brokerages, with allocation %, distance from the 52-week high, and unit price.
 - **Sidebar** (left) — toggle individual people and accounts on and off.
+- **⚙ Settings** (top right) — everything you can change lives behind this one
+  button; see [Settings](#settings) below.
 
 ### Why are the numbers hidden behind `••••••`?
 
-That screenshot was taken with **private mode** switched on — notice the button
-in the top-right reads **“Reveal values”**. Private mode is a one-click privacy
-screen for when someone is looking over your shoulder or you're sharing your
-display. It masks every dollar figure — the total value, the dividend / GIC /
-income estimates, and each holding's share count and market value — while
-leaving non-sensitive context (allocation %, sectors, unit prices) visible.
+That screenshot was taken with **private mode** switched on. Private mode is a
+one-click privacy screen for when someone is looking over your shoulder or
+you're sharing your display. It masks every dollar figure — the total value, the
+dividend / GIC / income estimates, and each holding's share count and market
+value — while leaving non-sensitive context (allocation %, sectors, unit prices)
+visible.
 
 Turning private mode **on** is instant. Turning it **off** (revealing the
 numbers again) requires your password, so a bystander can't simply switch it
 back. See [Set up your accounts](#2-set-up-your-accounts-env) for the password.
+
+### Settings
+
+The **⚙ Settings** button in the top-right corner opens a panel over the
+dashboard with four things:
+
+| Setting | What it does |
+| --- | --- |
+| **Theme** | Switch between the dark and light themes. |
+| **Private mode** | Hide every dollar figure (see above). |
+| **Open MoneyTor when I log in** | Start MoneyTor automatically when you sign in to your computer. |
+| **Export report…** | Write a PDF and a Markdown copy of the full portfolio. |
+
+**Open MoneyTor when I log in** registers MoneyTor with whatever your operating
+system already uses for startup apps — an autostart entry on Linux
+(`~/.config/autostart/moneytor.desktop`), a login item on macOS
+(`~/Library/LaunchAgents/io.moneytor.app.plist`), or a startup entry on Windows.
+Unticking it removes that entry again. Because MoneyTor reads the real entry
+rather than remembering its own answer, the tick stays accurate even if you
+later turn MoneyTor off through your system's own startup-apps settings.
+
+> The app still starts locked, so it will sit at the password gate until you
+> unlock it — logging in doesn't expose your portfolio.
 
 ---
 
@@ -130,7 +155,8 @@ uv run python src/main.py
 
 The dashboard opens, connects to your accounts, and shows your combined
 portfolio. From there you can toggle people and accounts on/off, explore the
-charts, and export reports.
+charts, and — via **⚙ Settings** — switch themes, hide values, export reports,
+and have MoneyTor open by itself next time you log in.
 
 ### Optional: add a desktop icon (Linux)
 

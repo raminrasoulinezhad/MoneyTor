@@ -41,6 +41,7 @@ src/moneytor/
   reporting/     PDF / Markdown exporters
   persistence/   local cache, asset-mapping files
   ui/            PySide6 widgets, theme, view-models
+  autostart.py   launch-at-login backends (XDG / LaunchAgent / HKCU Run)
 tests/           unit, integration, fixtures
 ```
 

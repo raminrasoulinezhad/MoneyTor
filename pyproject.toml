@@ -88,6 +88,13 @@ warn_return_any = false
 module = ["PySide6.*", "plotly.*"]
 ignore_missing_imports = true
 
+# winreg is a Windows-only stdlib module; typeshed guards it behind
+# sys.platform == "win32", so every attribute reads as undefined when we
+# type-check the Windows autostart backend from Linux/macOS.
+[[tool.mypy.overrides]]
+module = "moneytor.autostart"
+disable_error_code = ["attr-defined"]
+
 [tool.pylint.main]
 source-roots = ["src"]
 extension-pkg-allow-list = ["PySide6"]
