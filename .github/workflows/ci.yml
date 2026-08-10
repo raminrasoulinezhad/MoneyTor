@@ -38,7 +38,9 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v9
+        # Full version, not a floating major: setup-uv only publishes moving
+        # tags up to v7, so `@v9` does not resolve.
+        uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
 
