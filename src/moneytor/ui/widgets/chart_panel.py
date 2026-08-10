@@ -14,8 +14,10 @@ back to a compact text summary, so the app and its tests run anywhere.
 
 from __future__ import annotations
 
+import os
 import tempfile
 from collections.abc import Sequence
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -116,11 +118,11 @@ class ChartPanel(QWidget):
         load it by URL instead (no size limit, works offline).
         """
         if self._html_path is None:
-            handle = tempfile.NamedTemporaryFile(  # noqa: SIM115 - kept for the panel's lifetime
-                mode="w", suffix=".html", prefix="moneytor_chart_", delete=False, encoding="utf-8"
-            )
-            handle.close()
-            self._html_path = handle.name
+            # mkstemp, not NamedTemporaryFile: we want a unique path we own for
+            # the panel's lifetime, not a handle to hold open. The fd is closed
+            # straight away — every write below goes through Path.
+            handle, self._html_path = tempfile.mkstemp(suffix=".html", prefix="moneytor_chart_")
+            os.close(handle)
         Path(self._html_path).write_text(html, encoding="utf-8")
         self._webview.setUrl(QUrl.fromLocalFile(self._html_path))
         self._webview.show()
@@ -154,8 +156,6 @@ class ChartPanel(QWidget):
 
 def _summary(rows: Sequence[HoldingRow], by_sector: bool = False) -> str:
     """A compact textual allocation summary for headless/fallback rendering."""
-    from decimal import Decimal
-
     if by_sector:
         totals: dict[str, Decimal] = {}
         for row in rows:

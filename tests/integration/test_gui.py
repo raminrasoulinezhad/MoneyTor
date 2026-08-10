@@ -382,6 +382,55 @@ def test_chart_panel_empty_selection_message(qtbot) -> None:
     assert "No holdings" in window.dashboard.left_chart._body.text()
 
 
+class _StubWebView:
+    """Stands in for QWebEngineView, which never loads under offscreen Qt."""
+
+    def __init__(self) -> None:
+        self.urls: list[str] = []
+        self.shown = False
+
+    def setUrl(self, url) -> None:
+        self.urls.append(url.toLocalFile())
+
+    def show(self) -> None:
+        self.shown = True
+
+    def hide(self) -> None:
+        self.shown = False
+
+
+def test_chart_panel_writes_html_to_a_reused_temp_file(qtbot) -> None:
+    # The web view path never runs headlessly, so drive it with a stub. The
+    # panel keeps one temp file for its lifetime and rewrites it per render —
+    # QWebEngineView.setHtml truncates past ~2 MB, hence loading by URL.
+    from pathlib import Path
+
+    from moneytor.ui.widgets.chart_panel import ChartPanel
+
+    panel = ChartPanel()
+    qtbot.addWidget(panel)
+    panel._webview = _StubWebView()
+
+    panel._render_html("<html><body>first</body></html>")
+    path = Path(panel._html_path)
+
+    assert path.exists()
+    assert path.suffix == ".html"  # the view needs the extension to render it
+    assert path.name.startswith("moneytor_chart_")
+    assert path.read_text(encoding="utf-8").endswith("first</body></html>")
+    assert panel._webview.urls == [str(path)]
+    assert panel._webview.shown
+
+    # A second render overwrites in place rather than leaking another file.
+    panel._render_html("<html><body>second</body></html>")
+
+    assert panel._html_path == str(path)
+    assert "second" in path.read_text(encoding="utf-8")
+    assert panel._webview.urls == [str(path), str(path)]
+
+    path.unlink()
+
+
 # --------------------------------------------------------------------------- #
 # Private mode
 # --------------------------------------------------------------------------- #

@@ -71,5 +71,10 @@ jobs:
       - name: Type-check
         run: uv run mypy src
 
+      - name: Deep lint
+        # --fail-under=10 makes this pass/fail rather than a drifting score:
+        # src/ is at 10.00, so any new warning fails the build.
+        run: uv run pylint src/ --fail-under=10
+
       - name: Test
         run: uv run pytest --cov --cov-report=term-missing
