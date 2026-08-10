@@ -19,7 +19,7 @@ Source: https://open.er-api.com (free, keyless, updated daily).
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from decimal import Decimal, InvalidOperation
 
 import httpx
@@ -70,7 +70,9 @@ class SnapshotFxProvider:
     first fetch. :meth:`refresh` re-fetches and atomically replaces the snapshot.
     """
 
-    def __init__(self, fallback_usd_cad: Decimal, fetcher=fetch_usd_cad) -> None:
+    def __init__(
+        self, fallback_usd_cad: Decimal, fetcher: Callable[[], Decimal] = fetch_usd_cad
+    ) -> None:
         self._fetcher = fetcher
         self._snapshot = StaticFxProvider(usd_cad_table(fallback_usd_cad))
 

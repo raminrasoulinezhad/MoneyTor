@@ -16,6 +16,7 @@ field and shows an inline error; ``Quit`` (or Escape) abandons the launch.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -104,7 +105,7 @@ class LockScreen(QWidget):
         self._input.clear()
         self._input.setFocus()
 
-    def keyPressEvent(self, event) -> None:
+    def keyPressEvent(self, event: QKeyEvent) -> None:
         # Escape abandons the launch, mirroring the Quit button.
         if event.key() == Qt.Key.Key_Escape:
             self.cancelled.emit()

@@ -12,7 +12,7 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtGui import QKeySequence, QResizeEvent, QShortcut
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -218,7 +218,7 @@ class MainWindow(QMainWindow):
             self._lock_overlay.deleteLater()
             self._lock_overlay = None
 
-    def resizeEvent(self, event) -> None:
+    def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         # Keep the lock overlay covering the full window as it is resized.
         if self._lock_overlay is not None:

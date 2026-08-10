@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -35,6 +36,12 @@ from PySide6.QtWidgets import (
 
 from moneytor.formatting import PRIVATE_MASK, format_asset_class, format_quantity
 from moneytor.ui.viewmodels import HoldingRow
+
+if TYPE_CHECKING:
+    # typeshed's "anything sorted() accepts" protocol. It has no runtime module,
+    # hence the guard; `from __future__ import annotations` keeps the reference
+    # below a string so nothing is evaluated at import time.
+    from _typeshed import SupportsRichComparison
 
 _HEADERS = (
     "Symbol",
@@ -55,8 +62,10 @@ _TEXT_COLUMNS = frozenset({0, 1, 2, 3})
 # descending sort (and the top of an ascending one), matching the old behaviour.
 _NO_VALUE = Decimal("-1")
 
-# How to sort by each column: a HoldingRow -> comparable key.
-_SORT_KEYS: dict[int, Callable[[HoldingRow], object]] = {
+# How to sort by each column: a HoldingRow -> comparable key. Text columns
+# yield str and numeric ones Decimal; a column never mixes the two, so every
+# key is comparable against the others produced for that same column.
+_SORT_KEYS: dict[int, Callable[[HoldingRow], SupportsRichComparison]] = {
     0: lambda r: r.symbol.casefold(),
     1: lambda r: r.name.casefold(),
     2: lambda r: r.sector.casefold(),

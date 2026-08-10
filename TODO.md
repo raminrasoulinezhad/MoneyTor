@@ -9,17 +9,8 @@ and the full suite is green.
 
 **Run tests in CI.** `.github/workflows/` only has the secret scan. Nothing
 stops a push that breaks the suite, lint, or types. Add a workflow running
-`pytest`, `ruff`, and `mypy` on push and PR.
-
-**Clear the last 4 mypy errors.** `uv run mypy src` is down from 11 but not
-clean. All four are one-liners:
-
-| File | What |
-| --- | --- |
-| `ui/widgets/holdings_table.py` | `sorted(key=...)` returns `object`; the key needs a comparable type |
-| `fx/live.py`, `ui/main_window.py`, `ui/widgets/lock_screen.py` | Qt event handlers missing a parameter annotation |
-
-Worth doing before wiring mypy into CI, so the gate can start green.
+`pytest`, `ruff`, and `mypy` on push and PR — all three are green right now, so
+the gate would start clean. Qt needs `QT_QPA_PLATFORM=offscreen`.
 
 **Test the macOS and Windows autostart backends on real machines.** Both are
 unit-tested against a temp directory and a fake registry, but neither has ever
