@@ -122,8 +122,16 @@ uv run python src/main.py
 ./scripts/install-desktop.sh
 ```
 
-Press **Super** and type "MoneyTor", or double-click the desktop icon. Remove it
-later with `./scripts/install-desktop.sh --uninstall`.
+Press **Super** and type "MoneyTor", or double-click the desktop icon.
+
+To remove the launchers later:
+
+```bash
+./scripts/install-desktop.sh --uninstall
+```
+
+It lists what it will delete and asks first — add `-y` to skip the prompt. Only
+the launchers go; MoneyTor, your `.env`, and your cached data stay put.
 
 Prefer MoneyTor to open by itself? Tick **Open MoneyTor when I log in** in
 ⚙ Settings — it works on Linux, macOS, and Windows, and unticking removes it.
