@@ -1,0 +1,70 @@
+name: CI
+
+# Lint, type-check, and test on every push and pull request. The companion
+# secret-scan workflow guards credentials; this one guards correctness.
+#
+# Runs on both ends of the supported range: 3.12 is the floor declared by
+# requires-python, and 3.14 is what uv resolves to by default, so a change that
+# only works on one of them fails here rather than on a contributor's machine.
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # A newer push supersedes an in-flight run on the same ref.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # report 3.12 and 3.14 independently
+      matrix:
+        python-version: ["3.12", "3.14"]
+
+    env:
+      # Qt has no display on a runner; the offscreen platform plugin is what
+      # tests/conftest.py assumes locally too.
+      QT_QPA_PLATFORM: offscreen
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install Qt's system libraries
+        # PySide6 ships Qt itself but still links these; libegl1 and libgl1 are
+        # the two absent from a stock runner. Verified against
+        # `ldd .../platforms/libqoffscreen.so`.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libdbus-1-3 libxcb1 libxkbcommon0 \
+            libfontconfig1 libfreetype6
+
+      - name: Install dependencies
+        # --locked fails if uv.lock has drifted from pyproject.toml, so the
+        # lockfile stays trustworthy instead of silently re-resolving here.
+        run: uv sync --locked --python ${{ matrix.python-version }}
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Type-check
+        run: uv run mypy src
+
+      - name: Test
+        run: uv run pytest --cov --cov-report=term-missing

@@ -100,6 +100,23 @@ version lives — `pyproject.toml` reads it from there. Bump it per semver:
 
 ---
 
+## CI
+
+Two workflows, both on push and pull request:
+
+| Workflow | Runs |
+| --- | --- |
+| `ci.yml` | `ruff check`, `ruff format --check`, `mypy src`, `pytest --cov` on Python 3.12 and 3.14 |
+| `secret-scan.yml` | `gitleaks` over the full git history |
+
+- **3.12 and 3.14** are the ends of the supported range — the floor from
+  `requires-python` and what `uv` resolves to by default
+- `uv sync --locked` fails the build if `uv.lock` has drifted from
+  `pyproject.toml`
+- `pylint` stays local: its score is a float, which makes a poor pass/fail gate
+
+---
+
 ## Security
 
 - `.env` is gitignored; `.env.example` is the committed template
