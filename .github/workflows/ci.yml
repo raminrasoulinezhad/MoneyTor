@@ -43,6 +43,9 @@ jobs:
         uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
+          # Without a suffix both matrix jobs race to write one cache key and
+          # the loser logs a "could not reserve cache" warning every run.
+          cache-suffix: py${{ matrix.python-version }}
 
       - name: Install Qt's system libraries
         # PySide6 ships Qt itself but still links these; libegl1 and libgl1 are
