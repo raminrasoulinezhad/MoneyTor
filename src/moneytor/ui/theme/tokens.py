@@ -42,12 +42,12 @@ class ThemeTokens:
     # Typography
     font_family: str = "Inter, 'Segoe UI', 'San Francisco', sans-serif"
     font_size_base: int = 14
-    font_size_metric: int = 28
+    font_size_metric: int = 22
     font_size_label: int = 11
 
     # Layout
-    spacing: int = 16
-    spacing_lg: int = 24
+    spacing: int = 10
+    spacing_lg: int = 14
     radius: int = 12
     radius_sm: int = 8
 

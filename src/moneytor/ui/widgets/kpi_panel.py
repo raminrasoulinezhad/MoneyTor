@@ -25,8 +25,8 @@ class KpiPanel(QWidget):
         super().__init__(parent)
         self.setObjectName("KpiPanel")
         self._layout = QVBoxLayout(self)
-        self._layout.setContentsMargins(16, 16, 16, 8)
-        self._layout.setSpacing(12)
+        self._layout.setContentsMargins(10, 10, 10, 6)
+        self._layout.setSpacing(7)
         self._cards: list[KpiCard] = []
         self._kpis: tuple[KpiModel, ...] = ()
         self._private = False

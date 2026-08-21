@@ -48,8 +48,8 @@ class ChartPanel(QWidget):
         self.setObjectName("Panel")
 
         self._layout = QVBoxLayout(self)
-        self._layout.setContentsMargins(20, 16, 20, 16)
-        self._layout.setSpacing(8)
+        self._layout.setContentsMargins(14, 10, 14, 10)
+        self._layout.setSpacing(6)
 
         header = QHBoxLayout()
         title = QLabel("Portfolio Distribution")
@@ -69,7 +69,10 @@ class ChartPanel(QWidget):
         self._body.setObjectName("Placeholder")
         self._body.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._body.setWordWrap(True)
-        self._body.setMinimumHeight(220)
+        self._body.setMinimumHeight(130)
+        # Cap the card: the chart is context, the holdings table is the point,
+        # so surplus vertical space goes to rows rather than to a taller donut.
+        self.setMaximumHeight(230)
 
         self._layout.addLayout(header)
         self._layout.addWidget(self._body, stretch=1)

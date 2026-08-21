@@ -18,17 +18,56 @@ reduce each ticker to a canonical form by:
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from moneytor.domain.enums import AssetClass
+from moneytor.domain.enums import AssetClass, Currency
 from moneytor.domain.models import Account, Person
 
 # Suffixes that denote a listing venue (safe to strip), not a share class.
 # ``VN`` is TSX Venture as some feeds spell it (alongside ``V``); like the
 # others it only names the exchange, so ``ABC.VN`` collapses to ``ABC``.
 KNOWN_EXCHANGE_SUFFIXES = frozenset({"TO", "V", "VN", "NE", "CN", "TSX", "TSXV", "US"})
+
+# Listing venue -> the currency that venue quotes in. Brokers differ on whether
+# a holding's reported currency is the security's own or one they converted to
+# for us (Wealthsimple asks for CAD across the board), so the exchange is the
+# only trustworthy signal of what a *quote* for that security is denominated in.
+# Keys are compared upper-cased with punctuation collapsed to spaces.
+_EXCHANGE_CURRENCIES: dict[str, Currency] = {
+    "NYSE": Currency.USD,
+    "NYSE ARCA": Currency.USD,
+    "NYSE AMERICAN": Currency.USD,
+    "NASDAQ": Currency.USD,
+    "AMEX": Currency.USD,
+    "ARCA": Currency.USD,
+    "BATS": Currency.USD,
+    "OTC": Currency.USD,
+    "TSX": Currency.CAD,
+    "TSX V": Currency.CAD,
+    "TSXV": Currency.CAD,
+    "TSX VENTURE": Currency.CAD,
+    "CSE": Currency.CAD,
+    "NEO": Currency.CAD,
+    "CBOE CANADA": Currency.CAD,
+    "AEQUITAS NEO": Currency.CAD,
+}
+
+
+def currency_for_exchange(exchange: str) -> Currency | None:
+    """The currency ``exchange`` quotes in, or None when it is unknown/blank.
+
+    Unknown venues deliberately return None rather than guessing a default, so
+    callers fall back to whatever the broker reported instead of relabelling a
+    value with a currency it may not be in.
+    """
+    if not exchange:
+        return None
+    key = re.sub(r"[^A-Z0-9]+", " ", exchange.upper()).strip()
+    return _EXCHANGE_CURRENCIES.get(key)
+
 
 # The 11 official GICS sectors (for reference / file-override validation).
 GICS_SECTORS: tuple[str, ...] = (

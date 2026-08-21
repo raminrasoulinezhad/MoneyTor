@@ -33,8 +33,8 @@ class KpiCard(QWidget):
         self.setObjectName("KpiCard")
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 16, 20, 16)
-        layout.setSpacing(6)
+        layout.setContentsMargins(14, 9, 14, 9)
+        layout.setSpacing(2)
 
         self._title = QLabel(model.title)
         self._title.setObjectName("KpiTitle")

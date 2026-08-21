@@ -58,6 +58,8 @@ _VALUE_COLUMN = 5  # default sort column (descending)
 # Text columns default to ascending when first sorted; numeric ones default to
 # descending (largest first), which is what you usually want for money/size.
 _TEXT_COLUMNS = frozenset({0, 1, 2, 3})
+# Free-text columns wide enough to be cut off by the one-line row height.
+_ELIDABLE_COLUMNS = frozenset({1, 2})
 # Sort key for cells with no value, so they cluster at the bottom of a
 # descending sort (and the top of an ascending one), matching the old behaviour.
 _NO_VALUE = Decimal("-1")
@@ -97,6 +99,11 @@ class HoldingsTable(QTableWidget):
         self._private = False
         self._sort_col: int = _VALUE_COLUMN
         self._sort_order: Qt.SortOrder = Qt.SortOrder.DescendingOrder
+
+        # One line per holding: wrapping lets a long name grow a row to two or
+        # three lines, which costs far more rows on screen than the full name is
+        # worth. The Name column stretches, so it has room before eliding.
+        self.setWordWrap(False)
 
         # The vertical header is a rank gutter: each row carries an explicit
         # 1-based index (its standing in the full sorted set).
@@ -198,6 +205,10 @@ class HoldingsTable(QTableWidget):
         item = QTableWidgetItem(text)
         if align is not None:
             item.setTextAlignment(align)
+        # Rows are one line, so a long name or sector is elided. Carry the full
+        # text as a tooltip rather than losing it.
+        if col in _ELIDABLE_COLUMNS:
+            item.setToolTip(text)
         self.setItem(row, col, item)
 
     def _label_rank_corner(self) -> None:

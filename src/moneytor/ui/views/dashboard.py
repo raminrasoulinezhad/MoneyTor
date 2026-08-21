@@ -29,8 +29,8 @@ class DashboardView(QWidget):
         self.setObjectName("Root")
 
         self._outer = QVBoxLayout(self)
-        self._outer.setContentsMargins(24, 24, 24, 24)
-        self._outer.setSpacing(24)
+        self._outer.setContentsMargins(12, 12, 12, 12)
+        self._outer.setSpacing(10)
 
         self._tokens: ThemeTokens = DARK
         self._last_rows: tuple[HoldingRow, ...] = ()
@@ -39,7 +39,7 @@ class DashboardView(QWidget):
         # They default to complementary views (Holdings | Sectors) but either
         # can be switched to any available chart independently.
         charts_row = QHBoxLayout()
-        charts_row.setSpacing(24)
+        charts_row.setSpacing(12)
         self.left_chart = ChartPanel(default_mode="Holdings")
         self.right_chart = ChartPanel(default_mode="Sectors")
         self._charts = (self.left_chart, self.right_chart)

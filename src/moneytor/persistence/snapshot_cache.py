@@ -25,14 +25,19 @@ from moneytor.domain.money import Money
 
 DEFAULT_CACHE_PATH = Path(".cache") / "snapshot.json"
 # Version stamped into every cache we write.
-_SCHEMA_VERSION = 4
+_SCHEMA_VERSION = 5
 # Oldest cache version this code can still read. Bump this ONLY for a *breaking*
 # change (a renamed or removed field). Purely additive, optional fields (read
 # below with ``.get(...)`` defaults) stay backward-compatible, so a user's
 # cached values keep loading instantly across upgrades instead of being
 # discarded — older caches simply show the new field as empty until the next
 # live fetch repopulates it.
-_MIN_SUPPORTED_VERSION = 3
+# v5 fixed the currency Wealthsimple's 52-week high is tagged with: it was
+# labelled with the position's currency (always CAD, because positions are
+# requested in CAD) while the value is the security's own. A v4 cache therefore
+# holds USD highs labelled CAD, which no amount of conversion can recover, so
+# those caches are dropped and refetched rather than shown wrong.
+_MIN_SUPPORTED_VERSION = 5
 
 
 @dataclass(frozen=True)

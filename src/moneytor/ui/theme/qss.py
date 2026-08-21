@@ -38,7 +38,7 @@ def build_qss(t: ThemeTokens) -> str:
         letter-spacing: 1px;
     }}
     QCheckBox, QTreeWidget {{ background: transparent; border: none; }}
-    QTreeWidget::item {{ padding: 4px 2px; }}
+    QTreeWidget::item {{ padding: 2px 2px; }}
     QTreeWidget::item:hover {{ background: {t.surface_alt}; border-radius: {t.radius_sm}px; }}
 
     /* Cards */
@@ -91,7 +91,7 @@ def build_qss(t: ThemeTokens) -> str:
         color: {t.text};
         border: 1px solid {t.border};
         border-radius: {t.radius_sm}px;
-        padding: 6px 10px;
+        padding: 4px 10px;
         selection-background-color: {t.accent};
         selection-color: white;
     }}
@@ -114,7 +114,7 @@ def build_qss(t: ThemeTokens) -> str:
         color: white;
         border: none;
         border-radius: {t.radius_sm}px;
-        padding: 8px 16px;
+        padding: 6px 14px;
         font-weight: 600;
     }}
     QPushButton:hover {{ background: {t.accent_hover}; }}
@@ -159,11 +159,11 @@ def build_qss(t: ThemeTokens) -> str:
         color: {t.text_muted};
         border: none;
         border-bottom: 1px solid {t.border};
-        padding: 8px;
+        padding: 4px 8px;
         font-size: {t.font_size_label}px;
         text-transform: uppercase;
     }}
-    QTableWidget::item {{ padding: 6px 8px; }}
+    QTableWidget::item {{ padding: 2px 8px; }}
     /* The rank-gutter corner (top-left): match the column headers, label "#". */
     QTableView QTableCornerButton::section {{
         background: {t.surface};

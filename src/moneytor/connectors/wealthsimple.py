@@ -40,6 +40,7 @@ from typing import Any
 
 import httpx
 
+from moneytor.aggregation.normalize import currency_for_exchange
 from moneytor.config.secret import Secret
 from moneytor.domain.enums import AccountType, AssetClass, Currency, Institution
 from moneytor.domain.models import Account, Holding
@@ -380,15 +381,21 @@ class WealthsimpleConnector:
         symbol = stock.get("symbol") or security.get("id") or "UNKNOWN"
         market_value = _money_or_zero(node.get("totalValue"), "position.totalValue")
         high = highs.get(_security_id(node))
+        exchange = str(stock.get("primaryExchange") or "")
+        # Positions are requested in CAD, so market_value is converted for us.
+        # fundamentals.high52Week is not — SecurityMarketData takes no currency
+        # and answers in the security's own, so tag it from the listing venue.
+        # Unknown venue: fall back to the position currency, as before.
+        high_currency = currency_for_exchange(exchange) or market_value.currency
         return Holding(
             symbol=str(symbol),
             name=str(stock.get("name") or ""),
-            exchange=str(stock.get("primaryExchange") or ""),
+            exchange=exchange,
             asset_class=_SECURITY_TYPES.get(str(security.get("securityType")), AssetClass.OTHER),
             quantity=to_decimal(node.get("quantity", 0), "position.quantity"),
             book_value=_money_or_zero(node.get("bookValue"), "position.bookValue"),
             market_value=market_value,
-            high_52w=Money(high, market_value.currency) if high is not None else None,
+            high_52w=Money(high, high_currency) if high is not None else None,
         )
 
     def _map_cash(self, entries: list[dict[str, Any]]) -> tuple[Money, tuple[Holding, ...]]:

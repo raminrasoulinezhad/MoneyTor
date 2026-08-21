@@ -63,12 +63,13 @@ def test_stale_schema_version_is_ignored(tmp_path: Path) -> None:
     assert cache.load() is None
 
 
-def test_backward_compatible_older_version_still_loads(tmp_path: Path) -> None:
-    """An additive schema bump must not discard a user's cached values.
+def test_pre_v5_cache_is_discarded(tmp_path: Path) -> None:
+    """v5 corrected a currency label, so earlier caches hold wrong data.
 
-    A cache written before ``dividend_yield`` existed (version 3, no such field)
-    still loads instantly so the dashboard shows previous values on launch; the
-    missing field simply reads as ``None`` until the next live fetch.
+    Wealthsimple's 52-week high used to be tagged with the position's currency
+    (always CAD) while the value is the security's own, so a v4 cache stores USD
+    highs labelled CAD. That cannot be converted back, so those caches are
+    dropped and refetched rather than displayed.
     """
     import json
 
@@ -76,7 +77,26 @@ def test_backward_compatible_older_version_still_loads(tmp_path: Path) -> None:
     cache = SnapshotCache(path)
     cache.save(_people(), Currency.CAD)
     data = json.loads(path.read_text(encoding="utf-8"))
-    data["version"] = 3  # an older, still-supported schema
+
+    for stale in (3, 4):
+        data["version"] = stale
+        path.write_text(json.dumps(data), encoding="utf-8")
+        assert cache.load() is None, f"v{stale} cache must not load"
+
+
+def test_additive_fields_stay_backward_compatible(tmp_path: Path) -> None:
+    """A field added without bumping the floor must not discard a cache.
+
+    Optional fields are read with a default, so a cache written before one
+    existed still loads and shows previous values on launch — the missing field
+    simply reads as None until the next live fetch.
+    """
+    import json
+
+    path = tmp_path / "snap.json"
+    cache = SnapshotCache(path)
+    cache.save(_people(), Currency.CAD)
+    data = json.loads(path.read_text(encoding="utf-8"))
     for person in data["people"]:
         for account in person["accounts"]:
             for holding in account["holdings"]:

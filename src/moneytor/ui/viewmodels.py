@@ -23,29 +23,63 @@ from moneytor.aggregation import (
     build_snapshot,
     person_value,
 )
+from moneytor.aggregation.normalize import currency_for_exchange
 from moneytor.domain.enums import Currency
 from moneytor.domain.models import Person, PortfolioSnapshot, UnifiedHolding
 from moneytor.domain.money import Money
+from moneytor.fx.convert import convert
 from moneytor.fx.provider import FxProvider
 
 
-def _native_unit_price(holding: UnifiedHolding) -> Money | None:
-    """Current price per unit in the security's **native** (original) currency.
+def _native_currency(holding: UnifiedHolding) -> Currency:
+    """The currency a quote for this security is denominated in.
 
-    Summed source market values (native) divided by total quantity. The division
-    is left unrounded so the table can show sub-cent precision. Returns None when
-    there are no sources or the quantity is zero. Assumes the merged sources
-    share one native currency (the merge groups a single security), so the first
-    source's currency tags the result.
+    Taken from the listing venue, because a broker's reported currency may be
+    one it converted to on our behalf rather than the security's own
+    (Wealthsimple returns every position in CAD). Falls back to the first
+    source's reported currency when no source names a venue we recognise.
+    """
+    for source in holding.sources:
+        currency = currency_for_exchange(source.exchange)
+        if currency is not None:
+            return currency
+    return holding.sources[0].market_value.currency
+
+
+def _native_unit_price(holding: UnifiedHolding, provider: FxProvider | None = None) -> Money | None:
+    """Current price per unit, in the security's native currency.
+
+    Every source for one security carries the same underlying price, just
+    possibly expressed in different currencies — the same US stock arrives from
+    Questrade in USD and from Wealthsimple pre-converted to CAD. So this uses
+    only the sources already reported in the native currency and ignores the
+    rest: their amounts need no FX, and mixing currencies here would average a
+    USD price with a CAD one into a number that is neither.
+
+    The division is left unrounded so the table can show sub-cent precision.
+    Returns None with no sources, zero quantity, or no source in the native
+    currency (rather than inventing a rate).
     """
     if not holding.sources or holding.total_quantity == 0:
         return None
-    native_value = sum((s.market_value.amount for s in holding.sources), Decimal("0"))
-    currency = holding.sources[0].market_value.currency
-    return Money(native_value / holding.total_quantity, currency)
+    native = _native_currency(holding)
+    native_sources = [s for s in holding.sources if s.market_value.currency is native]
+    quantity = sum((s.quantity for s in native_sources), Decimal("0"))
+    if native_sources and quantity != 0:
+        value = sum((s.market_value.amount for s in native_sources), Decimal("0"))
+        return Money(value / quantity, native)
+    # No source reports in the native currency — a US listing held only through
+    # Wealthsimple, say, which converts everything to CAD. Convert instead of
+    # dropping the price, which is still better than showing nothing.
+    if provider is None:
+        return None
+    converted = Money.zero(native)
+    for source in holding.sources:
+        converted += convert(source.market_value, native, provider)
+    return Money(converted.amount / holding.total_quantity, native)
 
 
-def _high_52w_pct(holding: UnifiedHolding) -> Decimal | None:
+def _high_52w_pct(holding: UnifiedHolding, provider: FxProvider | None = None) -> Decimal | None:
     """How far below the 52-week high the current price sits, as a fraction.
 
     ``(52-week high - current price) / 52-week high`` — 0 means at the high,
@@ -55,10 +89,20 @@ def _high_52w_pct(holding: UnifiedHolding) -> Decimal | None:
     """
     if holding.high_52w is None or holding.high_52w.amount == 0:
         return None
-    price = _native_unit_price(holding)
+    price = _native_unit_price(holding, provider)
     if price is None:
         return None
-    return (holding.high_52w.amount - price.amount) / holding.high_52w.amount
+    high = holding.high_52w
+    if high.currency is not price.currency:
+        # A cache written before the 52-week high was tagged from the listing
+        # venue can disagree with the price; convert rather than compare across
+        # currencies, which would report a meaningless gap.
+        if provider is None:
+            return None
+        high = convert(high, price.currency, provider)
+        if high.amount == 0:
+            return None
+    return (high.amount - price.amount) / high.amount
 
 
 @dataclass(frozen=True)
@@ -192,8 +236,8 @@ def build_dashboard_view_model(
                     quantity=u.total_quantity,
                     value=u.total_market_value,
                     allocation=allocations.get(u.symbol, Decimal("0")),
-                    high_52w_pct=_high_52w_pct(u),
-                    unit_price_native=_native_unit_price(u),
+                    high_52w_pct=_high_52w_pct(u, provider),
+                    unit_price_native=_native_unit_price(u, provider),
                 )
                 for u in snapshot.unified_holdings
             ),

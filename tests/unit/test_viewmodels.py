@@ -11,11 +11,19 @@ from __future__ import annotations
 from decimal import Decimal
 from pathlib import Path
 
-from moneytor.aggregation import build_snapshot
+import pytest
+
+from moneytor.aggregation import build_snapshot, merge_holdings
 from moneytor.connectors import load_accounts
-from moneytor.domain import Currency, Person
+from moneytor.domain import AssetClass, Currency, Money, Person
+from moneytor.domain.models import Holding
 from moneytor.fx import StaticFxProvider
-from moneytor.ui.viewmodels import build_dashboard_view_model, view_model_for
+from moneytor.ui.viewmodels import (
+    _high_52w_pct,
+    _native_unit_price,
+    build_dashboard_view_model,
+    view_model_for,
+)
 
 CAD = Currency.CAD
 USD = Currency.USD
@@ -232,3 +240,100 @@ def test_allocation_pct_rounds_to_one_decimal() -> None:
         allocation=Decimal("0.001234"),  # 0.1234% -> "0.1%"
     )
     assert row.allocation_pct == "0.1%"
+
+
+# --------------------------------------------------------------------------- #
+# Unit price across brokers reporting different currencies
+# --------------------------------------------------------------------------- #
+
+
+def _oxy_source(exchange: str, qty: str, value: str, currency: Currency) -> Holding:
+    """One OXY position as a broker reports it."""
+    return Holding(
+        symbol="OXY",
+        name="Occidental Petroleum",
+        sector="Energy",
+        exchange=exchange,
+        asset_class=AssetClass.EQUITY,
+        quantity=Decimal(qty),
+        book_value=Money.of("1", currency),
+        market_value=Money(Decimal(value), currency),
+        high_52w=Money.of("67.45", Currency.USD),
+    )
+
+
+# Real shape of the bug: OXY held in 8 accounts, Questrade reporting USD and
+# Wealthsimple pre-converting to CAD. 61.37 USD/share and 84.452 CAD/share are
+# the same price at ~1.376.
+_MIXED_OXY = (
+    _oxy_source("", "11", "675.07", Currency.USD),
+    _oxy_source("", "27", "1656.99", Currency.USD),
+    _oxy_source("NYSE", "8", "675.616", Currency.CAD),
+    _oxy_source("NYSE", "31", "2618.012", Currency.CAD),
+    _oxy_source("NYSE", "1", "84.452", Currency.CAD),
+)
+_FX = StaticFxProvider(
+    rates={
+        (Currency.USD, Currency.CAD): Decimal("1.376"),
+        (Currency.CAD, Currency.USD): Decimal("0.72674"),
+    }
+)
+
+
+def test_unit_price_does_not_average_across_currencies() -> None:
+    # Summing the raw amounts gave (675.07+1656.99+675.616+2618.012+84.452)/78
+    # = 73.2 tagged USD — a USD/CAD blend that is neither price.
+    unified = merge_holdings(_MIXED_OXY, Currency.CAD, _FX)[0]
+    price = _native_unit_price(unified, _FX)
+
+    assert price is not None
+    assert price.currency is Currency.USD  # NYSE quotes in USD
+    assert price.amount == pytest.approx(Decimal("61.37"), abs=Decimal("0.01"))
+
+
+def test_unit_price_ignores_the_broker_converted_sources() -> None:
+    # The USD sources need no FX, so the price is exact rather than rate-dependent.
+    unified = merge_holdings(_MIXED_OXY, Currency.CAD, _FX)[0]
+    exact = Decimal("675.07") + Decimal("1656.99")
+    assert _native_unit_price(unified, _FX).amount == exact / Decimal("38")
+
+
+def test_unit_price_converts_when_no_source_is_native() -> None:
+    # A US listing held only through Wealthsimple: everything arrives in CAD, so
+    # the price is converted into USD rather than dropped.
+    ws_only = tuple(h for h in _MIXED_OXY if h.market_value.currency is Currency.CAD)
+    unified = merge_holdings(ws_only, Currency.CAD, _FX)[0]
+    price = _native_unit_price(unified, _FX)
+
+    assert price is not None
+    assert price.currency is Currency.USD
+    assert price.amount == pytest.approx(Decimal("61.37"), abs=Decimal("0.05"))
+
+
+def test_unit_price_uses_the_reported_currency_for_unknown_exchanges() -> None:
+    # No venue we recognise: trust what the broker said instead of guessing.
+    holding = _oxy_source("SOME-EXCHANGE", "10", "610.00", Currency.USD)
+    unified = merge_holdings((holding,), Currency.CAD, _FX)[0]
+    price = _native_unit_price(unified, _FX)
+
+    assert price == Money(Decimal("61"), Currency.USD)
+
+
+def test_52_week_gap_is_positive_for_a_mixed_currency_holding() -> None:
+    # The blended 76.02 sat above the 67.45 high, reporting a negative gap.
+    unified = merge_holdings(_MIXED_OXY, Currency.CAD, _FX)[0]
+    pct = _high_52w_pct(unified, _FX)
+
+    assert pct is not None
+    assert pct > 0
+    assert pct == pytest.approx(Decimal("0.090"), abs=Decimal("0.005"))
+
+
+def test_tsx_listing_prices_in_cad() -> None:
+    holding = _oxy_source("TSX", "10", "2978.20", Currency.CAD)
+    unified = merge_holdings((holding,), Currency.CAD, _FX)[0]
+    price = _native_unit_price(unified, _FX)
+
+    assert price is not None
+    assert price.currency is Currency.CAD
+    assert price.amount == Decimal("297.82")
