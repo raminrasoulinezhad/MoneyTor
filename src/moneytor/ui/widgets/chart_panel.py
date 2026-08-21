@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QGuiApplication, QResizeEvent
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -38,6 +38,10 @@ from moneytor.ui.viewmodels import HoldingRow
 
 _HOLDINGS = "Holdings"
 _SECTORS = "Sectors"
+# Floor for the plot area, so a fully-collapsed card still renders something.
+_MIN_CHART_HEIGHT = 90
+# Only re-render the (multi-MB) Plotly document once the height really moved.
+_RERENDER_THRESHOLD = 24
 
 
 class ChartPanel(QWidget):
@@ -69,10 +73,9 @@ class ChartPanel(QWidget):
         self._body.setObjectName("Placeholder")
         self._body.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._body.setWordWrap(True)
-        self._body.setMinimumHeight(130)
-        # Cap the card: the chart is context, the holdings table is the point,
-        # so surplus vertical space goes to rows rather than to a taller donut.
-        self.setMaximumHeight(230)
+        # No maximum: the dashboard splitter decides how tall the card is, so
+        # dragging the divider is what enlarges the plot.
+        self._body.setMinimumHeight(90)
 
         self._layout.addLayout(header)
         self._layout.addWidget(self._body, stretch=1)
@@ -83,6 +86,7 @@ class ChartPanel(QWidget):
         self._html_path: str | None = None
         self._rows: tuple[HoldingRow, ...] = ()
         self._tokens: ThemeTokens = DARK
+        self._rendered_height = 0
 
     def set_allocation(self, rows: Sequence[HoldingRow], tokens: ThemeTokens = DARK) -> None:
         """Store rows and render the currently-selected chart (holdings/sectors)."""
@@ -104,11 +108,13 @@ class ChartPanel(QWidget):
             return
         by_sector = self.selector.currentText() == _SECTORS
         if self._ensure_webview():
+            height = self._chart_height()
             html = (
-                sector_pie_html(rows, self._tokens)
+                sector_pie_html(rows, self._tokens, height)
                 if by_sector
-                else holdings_pie_html(rows, self._tokens)
+                else holdings_pie_html(rows, self._tokens, height)
             )
+            self._rendered_height = height
             self._render_html(html)
         else:
             self._show_text(_summary(rows, by_sector))
@@ -130,6 +136,24 @@ class ChartPanel(QWidget):
         self._webview.setUrl(QUrl.fromLocalFile(self._html_path))
         self._webview.show()
         self._body.hide()
+
+    def _chart_height(self) -> int:
+        """Pixels available to the plot inside this card, after header/margins."""
+        margins = self._layout.contentsMargins()
+        chrome = margins.top() + margins.bottom() + self.selector.sizeHint().height()
+        chrome += self._layout.spacing()
+        return max(_MIN_CHART_HEIGHT, self.height() - chrome)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        # Plotly bakes a pixel height into the document, so a resized card needs
+        # a re-render or the donut is clipped/floating. Re-rendering costs a
+        # multi-megabyte HTML write, so only bother once the height has actually
+        # moved a meaningful amount (e.g. after a splitter drag settles).
+        if self._webview is None or not self._rows:
+            return
+        if abs(self._chart_height() - self._rendered_height) >= _RERENDER_THRESHOLD:
+            self._rerender()
 
     def _show_text(self, text: str) -> None:
         if self._webview is not None:

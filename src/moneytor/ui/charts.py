@@ -41,8 +41,17 @@ _HOLDINGS_THRESHOLD = Decimal("0.01")  # holdings pie: < 1% -> "Others"
 _SECTOR_THRESHOLD = Decimal("0.02")  # sector pie: < 2% -> "Other"
 _UNKNOWN_SECTOR = "Unknown"
 
+# Plotly needs a pixel height; the panel passes its own so the figure cannot
+# overflow the card. This default only applies to direct callers.
+DEFAULT_CHART_HEIGHT = 170
 
-def _donut_html(labels: Sequence[str], values: Sequence[Decimal], tokens: ThemeTokens) -> str:
+
+def _donut_html(
+    labels: Sequence[str],
+    values: Sequence[Decimal],
+    tokens: ThemeTokens,
+    height: int = DEFAULT_CHART_HEIGHT,
+) -> str:
     """Render a donut chart from parallel label/value sequences as full HTML."""
     figure = go.Figure(
         data=[
@@ -68,7 +77,7 @@ def _donut_html(labels: Sequence[str], values: Sequence[Decimal], tokens: ThemeT
         font={"color": tokens.text, "family": tokens.font_family},
         showlegend=False,
         margin={"t": 8, "b": 8, "l": 8, "r": 8},
-        height=440,
+        height=height,
     )
     return figure.to_html(
         include_plotlyjs="inline",
@@ -77,9 +86,11 @@ def _donut_html(labels: Sequence[str], values: Sequence[Decimal], tokens: ThemeT
     )
 
 
-def allocation_donut_html(rows: Sequence[HoldingRow], tokens: ThemeTokens) -> str:
+def allocation_donut_html(
+    rows: Sequence[HoldingRow], tokens: ThemeTokens, height: int = DEFAULT_CHART_HEIGHT
+) -> str:
     """Donut of allocation by symbol (every holding shown individually)."""
-    return _donut_html([r.symbol for r in rows], [r.value.amount for r in rows], tokens)
+    return _donut_html([r.symbol for r in rows], [r.value.amount for r in rows], tokens, height)
 
 
 def _grouped(
@@ -102,18 +113,22 @@ def _grouped(
     return labels, values
 
 
-def holdings_pie_html(rows: Sequence[HoldingRow], tokens: ThemeTokens) -> str:
+def holdings_pie_html(
+    rows: Sequence[HoldingRow], tokens: ThemeTokens, height: int = DEFAULT_CHART_HEIGHT
+) -> str:
     """Donut by symbol, grouping holdings under 1% of the portfolio into 'Others'."""
     totals: dict[str, Decimal] = {row.symbol: row.value.amount for row in rows}
     labels, values = _grouped(totals, _HOLDINGS_THRESHOLD, "Others")
-    return _donut_html(labels, values, tokens)
+    return _donut_html(labels, values, tokens, height)
 
 
-def sector_pie_html(rows: Sequence[HoldingRow], tokens: ThemeTokens) -> str:
+def sector_pie_html(
+    rows: Sequence[HoldingRow], tokens: ThemeTokens, height: int = DEFAULT_CHART_HEIGHT
+) -> str:
     """Donut by GICS sector ('Unknown' when missing), sectors under 2% as 'Other'."""
     totals: dict[str, Decimal] = {}
     for row in rows:
         key = row.sector or _UNKNOWN_SECTOR
         totals[key] = totals.get(key, Decimal("0")) + row.value.amount
     labels, values = _grouped(totals, _SECTOR_THRESHOLD, "Other")
-    return _donut_html(labels, values, tokens)
+    return _donut_html(labels, values, tokens, height)

@@ -118,6 +118,10 @@ class HoldingRow:
     sector: str = ""
     high_52w_pct: Decimal | None = None  # current price / 52-week high (0..1+)
     unit_price_native: Money | None = None  # price per unit in original currency
+    # The same price in the display currency. Shown natively but *sorted* by
+    # this, because the column mixes currencies (USD for a NYSE listing, CAD
+    # for a TSX one) and comparing raw numbers ranks 120 CAD above 100 USD.
+    unit_price_display: Money | None = None
 
     @property
     def allocation_pct(self) -> str:
@@ -237,7 +241,12 @@ def build_dashboard_view_model(
                     value=u.total_market_value,
                     allocation=allocations.get(u.symbol, Decimal("0")),
                     high_52w_pct=_high_52w_pct(u, provider),
-                    unit_price_native=_native_unit_price(u, provider),
+                    unit_price_native=(native_price := _native_unit_price(u, provider)),
+                    unit_price_display=(
+                        convert(native_price, snapshot.display_currency, provider)
+                        if native_price is not None
+                        else None
+                    ),
                 )
                 for u in snapshot.unified_holdings
             ),

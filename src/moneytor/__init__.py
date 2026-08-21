@@ -10,4 +10,4 @@
 # (see [tool.hatch.version]), so the window title, the built wheel, and the
 # lockfile cannot drift apart again. Bump per semver — major for a breaking
 # change, minor for a new feature, patch for a fix.
-__version__ = "1.2.0"
+__version__ = "1.3.0"

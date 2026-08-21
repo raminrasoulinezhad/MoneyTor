@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from moneytor.domain import Currency, Money
 from moneytor.formatting import PRIVATE_MASK, format_asset_class, format_quantity
 from moneytor.ui.viewmodels import HoldingRow
 
@@ -63,6 +64,7 @@ _ELIDABLE_COLUMNS = frozenset({1, 2})
 # Sort key for cells with no value, so they cluster at the bottom of a
 # descending sort (and the top of an ascending one), matching the old behaviour.
 _NO_VALUE = Decimal("-1")
+_NO_MONEY = Money(_NO_VALUE, Currency.CAD)
 
 # How to sort by each column: a HoldingRow -> comparable key. Text columns
 # yield str and numeric ones Decimal; a column never mixes the two, so every
@@ -76,7 +78,10 @@ _SORT_KEYS: dict[int, Callable[[HoldingRow], SupportsRichComparison]] = {
     5: lambda r: r.value.amount,
     6: lambda r: r.allocation,
     7: lambda r: r.high_52w_pct if r.high_52w_pct is not None else _NO_VALUE,
-    8: lambda r: r.unit_price_native.amount if r.unit_price_native is not None else _NO_VALUE,
+    # Sorted on the display-currency price, not the shown native one: the column
+    # mixes currencies, so raw numbers are not comparable. Falls back to the
+    # native price when no converted one was supplied.
+    8: lambda r: (r.unit_price_display or r.unit_price_native or _NO_MONEY).amount,
 }
 
 

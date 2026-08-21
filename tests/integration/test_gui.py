@@ -19,12 +19,14 @@ import pytest
 
 pytest.importorskip("pytestqt")
 
+from PySide6.QtCore import Qt
+
 from moneytor.autostart import AutostartError
 from moneytor.config.secret import Secret
 from moneytor.config.settings import PersonCredentials, Settings
 from moneytor.connectors import load_accounts
 from moneytor.connectors.errors import AuthError
-from moneytor.domain import Currency, Person
+from moneytor.domain import AssetClass, Currency, Money, Person
 from moneytor.domain.enums import Institution
 from moneytor.fx import StaticFxProvider
 from moneytor.persistence.token_store import TokenStore
@@ -873,3 +875,102 @@ def test_gui_otp_provider_returns_empty_on_cancel(qtbot, monkeypatch) -> None:
         worker.start()
     assert blocker.args == [""]
     worker.wait()
+
+
+# --------------------------------------------------------------------------- #
+# Dashboard density and the charts/list divider
+# --------------------------------------------------------------------------- #
+
+
+def test_charts_and_table_share_a_draggable_splitter(qtbot) -> None:
+    window = _window(qtbot)
+    window.show()
+    splitter = window.dashboard.splitter
+
+    assert splitter.count() == 2
+    assert splitter.orientation() == Qt.Orientation.Vertical
+    # Neither side may be dragged away entirely.
+    assert not splitter.childrenCollapsible()
+
+
+def test_window_growth_goes_to_the_list_not_taller_charts(qtbot) -> None:
+    window = _window(qtbot)
+    window.resize(1600, 800)
+    window.show()
+    charts_before, table_before = window.dashboard.splitter.sizes()
+
+    window.resize(1600, 1200)
+    charts_after, table_after = window.dashboard.splitter.sizes()
+
+    assert charts_after == charts_before  # charts keep their height
+    assert table_after > table_before  # the extra 400px becomes rows
+
+
+def test_dragging_the_divider_moves_space_from_charts_to_the_table(qtbot) -> None:
+    window = _window(qtbot)
+    window.resize(1600, 1000)
+    window.show()
+    splitter = window.dashboard.splitter
+    charts_before, table_before = splitter.sizes()
+
+    splitter.setSizes([charts_before + 200, max(50, table_before - 200)])
+    charts_after, table_after = splitter.sizes()
+
+    assert charts_after > charts_before
+    assert table_after < table_before
+
+
+def test_charts_start_compact_so_the_list_gets_the_room(qtbot) -> None:
+    window = _window(qtbot)
+    window.resize(1600, 1000)
+    window.show()
+    charts, table = window.dashboard.splitter.sizes()
+    # The holdings list is the point of the screen.
+    assert table > charts
+
+
+def test_holdings_rows_are_single_line(qtbot) -> None:
+    # Wrapping a long name over two lines costs more rows than the name is worth.
+    window = _window(qtbot)
+    assert window.dashboard.table.wordWrap() is False
+
+
+def test_elided_text_columns_carry_a_tooltip(qtbot) -> None:
+    window = _window(qtbot)
+    table = window.dashboard.table
+    name = table.item(0, 1)
+    assert name.toolTip() == name.text()
+    assert name.toolTip() != ""
+    # Numeric columns are never elided, so they stay tooltip-free.
+    assert table.item(0, 5).toolTip() == ""
+
+
+def test_unit_price_sorts_on_the_display_currency(qtbot) -> None:
+    # The column mixes currencies (USD for NYSE, CAD for TSX), so a raw-number
+    # sort would rank 120 CAD above 100 USD (~137 CAD).
+    from moneytor.ui.viewmodels import HoldingRow
+    from moneytor.ui.widgets.holdings_table import HoldingsTable
+
+    rate = Decimal("1.376")
+
+    def row(symbol: str, price: str, currency: Currency) -> HoldingRow:
+        native = Money.of(price, currency)
+        display = native if currency is CAD else Money(native.amount * rate, CAD)
+        return HoldingRow(
+            symbol=symbol,
+            name=symbol,
+            sector="X",
+            asset_class=AssetClass.EQUITY,
+            quantity=Decimal("1"),
+            value=Money.of("100", CAD),
+            allocation=Decimal("0.1"),
+            unit_price_native=native,
+            unit_price_display=display,
+        )
+
+    table = HoldingsTable()
+    qtbot.addWidget(table)
+    table.set_rows([row("US100", "100", USD), row("CA120", "120", CAD), row("US90", "90", USD)])
+    table.horizontalHeader().sectionClicked.emit(8)
+
+    assert [table.item(r, 0).text() for r in range(table.rowCount())] == ["US100", "US90", "CA120"]
