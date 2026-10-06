@@ -10,12 +10,13 @@ from __future__ import annotations
 
 import logging
 import sys
+from collections.abc import Mapping
 from decimal import Decimal
 from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 
-from moneytor.aggregation import SectorMap, apply_sector_map
+from moneytor.aggregation import DEFAULT_SECTORS, SectorMap, apply_sector_map
 from moneytor.config.errors import ConfigError
 from moneytor.config.logging import setup_logging
 from moneytor.config.settings import PersonCredentials, Settings, load_settings
@@ -42,19 +43,24 @@ _LOG = logging.getLogger(__name__)
 _FALLBACK_USD_CAD = Decimal("1.36")
 
 _FIXTURE = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "mock_accounts.json"
-# Optional user-maintained ticker -> GICS sector overrides (fills broker gaps).
+# Optional user-maintained ticker -> GICS sector overrides, layered over the
+# bundled DEFAULT_SECTORS (both fill gaps the brokers leave).
 _SECTOR_MAP_PATH = Path(".cache") / "sectors.json"
 
 
 def _load_sector_map() -> SectorMap:
-    """Load the optional ticker->sector override file, or an empty map."""
-    if not _SECTOR_MAP_PATH.exists():
-        return SectorMap()
-    try:
-        return SectorMap.from_file(_SECTOR_MAP_PATH)
-    except (OSError, ValueError) as exc:
-        _LOG.warning("Ignoring invalid sector map %s: %s", _SECTOR_MAP_PATH, exc)
-        return SectorMap()
+    """The bundled ticker->sector defaults, overlaid with the user's file.
+
+    The user's entries win, so a wrong or outdated default can always be
+    corrected locally without editing the package.
+    """
+    overrides: Mapping[str, str] = {}
+    if _SECTOR_MAP_PATH.exists():
+        try:
+            overrides = SectorMap.from_file(_SECTOR_MAP_PATH).sectors
+        except (OSError, ValueError) as exc:
+            _LOG.warning("Ignoring invalid sector map %s: %s", _SECTOR_MAP_PATH, exc)
+    return SectorMap({**DEFAULT_SECTORS, **overrides})
 
 
 def demo_people() -> tuple[Person, ...]:

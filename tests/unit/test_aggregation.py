@@ -15,6 +15,8 @@ from pathlib import Path
 import pytest
 
 from moneytor.aggregation import (
+    DEFAULT_SECTORS,
+    GICS_SECTORS,
     AssetMap,
     SectorMap,
     account_value,
@@ -29,6 +31,7 @@ from moneytor.aggregation import (
     person_value,
     totals_by_currency,
 )
+from moneytor.aggregation.normalize import KNOWN_EXCHANGE_SUFFIXES
 from moneytor.connectors import load_accounts
 from moneytor.domain import (
     AccountType,
@@ -360,6 +363,90 @@ def test_bullion_symbols_classified_as_bullion(symbol: str) -> None:
     holding = replace(_holding(symbol, "", CAD, "1", "100"), sector="Materials")
     unified = merge_holdings((holding,), CAD, PROVIDER)
     assert unified[0].sector == "Bullion"
+
+
+def test_sector_map_matches_exchange_suffixed_tickers() -> None:
+    # The brokers report "CVE.TO" while merge_holdings groups under the
+    # canonical "CVE", so an override keyed either way must hit. This silently
+    # did nothing before, leaving Cenovus (and every other .TO holding whose
+    # sector the user had supplied) classified as Unknown.
+    sector_map = SectorMap({"CVE": "Energy", "FNV.TO": "Materials"})
+    people = (
+        _person_with(_holding("CVE.TO", "TSX", CAD, "1", "10")),
+        _person_with(_holding("FNV", "TSX", CAD, "1", "10")),
+    )
+
+    filled = apply_sector_map(people, sector_map)
+    assert filled[0].accounts[0].holdings[0].sector == "Energy"
+    assert filled[1].accounts[0].holdings[0].sector == "Materials"
+
+
+def test_share_class_suffix_is_not_stripped_for_lookup() -> None:
+    # ".A"/".UN" denote a share class or trust unit, not a listing venue, so
+    # they must stay part of the key — TECK.A and TECK.B are distinct listings.
+    sector_map = SectorMap({"TECK.A": "Materials"})
+    people = (_person_with(_holding("TECK.B", "TSX", CAD, "1", "10")),)
+    filled = apply_sector_map(people, sector_map)
+    assert filled[0].accounts[0].holdings[0].sector == ""
+
+
+def test_broker_sector_propagates_to_the_same_ticker_elsewhere() -> None:
+    # Questrade classifies, Wealthsimple does not. One account's broker data
+    # must fill the other's gap and outrank the map, whatever the ordering —
+    # merge_holdings takes the first non-empty sector among a symbol's sources.
+    sector_map = SectorMap({"DOL": "Consumer Discretionary"})
+    unclassified = _person_with(_holding("DOL.TO", "TSX", CAD, "1", "10"))
+    reported = replace(_holding("DOL", "TSX", CAD, "1", "10"), sector="Consumer Defensive")
+    classified = _person_with(reported)
+
+    for people in ((unclassified, classified), (classified, unclassified)):
+        filled = apply_sector_map(people, sector_map)
+        sectors = {h.sector for p in filled for a in p.accounts for h in a.holdings}
+        assert sectors == {"Consumer Staples"}  # normalized broker value, not the map
+
+
+def test_existing_sectors_are_renormalized() -> None:
+    # Questrade emits both "Industrial" and "Industrials", which split one
+    # sector across two donut slices. Cached snapshots hold the raw value, so
+    # the fix has to reach non-empty sectors too, not just fill blanks.
+    stale = _person_with(replace(_holding("WCN", "TSX", CAD, "1", "10"), sector="Industrial"))
+    filled = apply_sector_map((stale,), SectorMap())
+    assert filled[0].accounts[0].holdings[0].sector == "Industrials"
+
+
+@pytest.mark.parametrize(
+    ("asset_class", "expected"),
+    [
+        (AssetClass.CASH, "Cash"),
+        (AssetClass.GIC, "Cash-Equivalent"),
+        # Neither broker exposes a GIC type; both file GICs as a bond.
+        (AssetClass.FIXED_INCOME, "Cash-Equivalent"),
+        (AssetClass.CRYPTO, "Crypto"),
+    ],
+)
+def test_non_equity_classes_get_a_synthetic_sector(asset_class: AssetClass, expected: str) -> None:
+    holding = replace(_holding("XYZ", "", CAD, "1", "100"), asset_class=asset_class)
+    assert merge_holdings((holding,), CAD, PROVIDER)[0].sector == expected
+
+
+@pytest.mark.parametrize("symbol", ["BTC", "btc", "ETH"])
+def test_coins_filed_as_other_are_classified_as_crypto(symbol: str) -> None:
+    # Wealthsimple hands Bitcoin over as a plain "other" security.
+    holding = replace(_holding(symbol, "", CAD, "1", "100"), asset_class=AssetClass.OTHER)
+    assert merge_holdings((holding,), CAD, PROVIDER)[0].sector == "Crypto"
+
+
+def test_bundled_defaults_are_canonical_gics_or_known_synthetics() -> None:
+    allowed = set(GICS_SECTORS) | {"Commodities", "Bullion", "Crypto"}
+    unknown = {s for s in DEFAULT_SECTORS.values() if s not in allowed}
+    assert unknown == set()
+
+
+def test_bundled_default_keys_carry_no_exchange_suffix() -> None:
+    # SectorMap strips venue suffixes before lookup, so a key like "CVE.TO"
+    # would be unreachable whenever the broker reports the bare ticker.
+    suffixed = {k for k in DEFAULT_SECTORS if k.rpartition(".")[2] in KNOWN_EXCHANGE_SUFFIXES}
+    assert suffixed == set()
 
 
 @pytest.mark.parametrize(

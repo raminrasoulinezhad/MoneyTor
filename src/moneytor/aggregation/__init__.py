@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from .default_sectors import DEFAULT_SECTORS
 from .merge import merge_holdings
 from .normalize import GICS_SECTORS, AssetMap, SectorMap, apply_sector_map, normalize_sector
 from .snapshot import (
@@ -23,6 +24,7 @@ from .snapshot import (
 )
 
 __all__ = [
+    "DEFAULT_SECTORS",
     "GICS_SECTORS",
     "AssetMap",
     "SectorMap",

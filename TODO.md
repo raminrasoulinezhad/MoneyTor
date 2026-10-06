@@ -1,6 +1,6 @@
 # TODO
 
-Known gaps as of **v1.3.0**. Nothing here blocks using the app — it all runs,
+Known gaps as of **v1.4.0**. Nothing here blocks using the app — it all runs,
 and the full suite is green.
 
 ---
@@ -23,6 +23,6 @@ run on the OS it targets. The Linux backend is verified end to end
   symbol + percentage, so nothing is on screen — but Plotly embeds the raw
   amounts as figure data, readable by anyone with devtools. Feeding it allocation
   fractions instead of dollars would render identically and remove them
-- **Sector overrides are undocumented.** `.cache/sectors.json` maps tickers to
-  GICS sectors and fills gaps where Wealthsimple returns none — worth a README
-  section, since holdings otherwise show "Unknown"
+- **The bundled sector table is hand-maintained.** `aggregation/default_sectors.py`
+  covers the tickers seen so far; a new holding your broker doesn't classify
+  still shows "Unknown" until it's added there or to `.cache/sectors.json`

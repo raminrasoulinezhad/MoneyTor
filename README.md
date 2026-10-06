@@ -139,6 +139,33 @@ The app still starts locked, so logging in doesn't expose your portfolio.
 
 ---
 
+## Fixing a wrong sector
+
+Sectors come from your broker, but Wealthsimple reports almost none, so MoneyTor
+ships a built-in ticker → sector table to fill the gaps. The order is:
+
+1. What your broker says
+2. What the other broker says, if you hold the same stock there
+3. MoneyTor's built-in table
+
+To correct or add one, create `.cache/sectors.json` — your entries beat all three:
+
+```json
+{
+  "CVE": "Energy",
+  "ATH": "Energy"
+}
+```
+
+- Use the plain ticker — `CVE` also covers `CVE.TO`
+- Keep share-class and unit suffixes in full — `TECK.A`, `CAR.UN`
+- Stick to the 11 GICS sector names, or `Bullion`, `Crypto`, `Commodities`
+- Changes apply on the next launch; no need to refetch
+
+Cash, GICs, bullion, and crypto are bucketed automatically and ignore this file.
+
+---
+
 ## Troubleshooting
 
 | Problem | Fix |
@@ -147,6 +174,7 @@ The app still starts locked, so logging in doesn't expose your portfolio.
 | Login fails or asks for a code | Wealthsimple 2FA — enter the texted code when prompted |
 | A person won't load | They need *either* a Questrade token *or* both a Wealthsimple email **and** password |
 | Values won't unhide | Private mode needs `MONEYTOR_APP_PASSWORD` — the same one used on launch |
+| A holding shows the wrong sector | Add it to `.cache/sectors.json` — see [Fixing a wrong sector](#fixing-a-wrong-sector) |
 
 ---
 
