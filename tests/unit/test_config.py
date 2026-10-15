@@ -163,3 +163,41 @@ def test_setup_logging_emits_redacted_output(capsys: pytest.CaptureFixture[str])
     err = capsys.readouterr().err
     assert "topsecret" not in err
     assert "***" in err
+
+
+def test_person_name_is_read_from_config() -> None:
+    settings = load_settings(
+        env_file=None,
+        environ={
+            "MONEYTOR__PERSON1__NAME": "  Alex  ",
+            "MONEYTOR__PERSON1__QUESTRADE_REFRESH_TOKEN": "qt-token",
+        },
+    )
+    person = settings.people[0]
+    assert person.person_id == "person1"
+    assert person.name == "Alex"  # surrounding whitespace dropped
+    assert person.display_name == "Alex"
+
+
+def test_display_name_falls_back_to_the_person_id() -> None:
+    settings = load_settings(
+        env_file=None, environ={"MONEYTOR__PERSON2__QUESTRADE_REFRESH_TOKEN": "qt-token"}
+    )
+    assert settings.people[0].display_name == "Person2"
+
+
+def test_name_alone_is_not_usable_credentials() -> None:
+    with pytest.raises(ConfigError, match="no usable credentials"):
+        load_settings(env_file=None, environ={"MONEYTOR__PERSON1__NAME": "Alex"})
+
+
+def test_name_is_not_treated_as_a_secret() -> None:
+    settings = load_settings(
+        env_file=None,
+        environ={
+            "MONEYTOR__PERSON1__NAME": "Alex",
+            "MONEYTOR__PERSON1__QUESTRADE_REFRESH_TOKEN": "qt-token",
+        },
+    )
+    # Redacting a plain name would blank it out of every log line it appears in.
+    assert "Alex" not in settings.secret_values()

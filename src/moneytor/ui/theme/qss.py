@@ -154,16 +154,22 @@ def build_qss(t: ThemeTokens) -> str:
         selection-background-color: {t.accent};
         selection-color: white;
     }}
+    /* Columns no longer fill the table, so the header's empty tail shows;
+       without this it is Qt's default light grey. */
+    QHeaderView {{ background: {t.surface}; border: none; }}
     QHeaderView::section {{
         background: {t.surface};
         color: {t.text_muted};
         border: none;
         border-bottom: 1px solid {t.border};
-        padding: 4px 8px;
+        padding: 4px 4px;
         font-size: {t.font_size_label}px;
         text-transform: uppercase;
     }}
-    QTableWidget::item {{ padding: 2px 8px; }}
+    /* Qt reserves room for the sort arrow in every header, sorted or not, and
+       for short numeric columns that reserve is most of the width. */
+    QHeaderView::up-arrow, QHeaderView::down-arrow {{ width: 8px; height: 8px; }}
+    QTableWidget::item {{ padding: 2px 6px; }}
     /* The rank-gutter corner (top-left): match the column headers, label "#". */
     QTableView QTableCornerButton::section {{
         background: {t.surface};

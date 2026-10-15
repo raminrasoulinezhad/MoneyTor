@@ -19,7 +19,9 @@ from moneytor.domain import AssetClass, Currency, Money, Person
 from moneytor.domain.models import Holding
 from moneytor.fx import StaticFxProvider
 from moneytor.ui.viewmodels import (
+    HoldingRow,
     _high_52w_pct,
+    _native_avg_cost,
     _native_unit_price,
     build_dashboard_view_model,
     view_model_for,
@@ -337,3 +339,99 @@ def test_tsx_listing_prices_in_cad() -> None:
     assert price is not None
     assert price.currency is Currency.CAD
     assert price.amount == Decimal("297.82")
+
+
+# --------------------------------------------------------------------------- #
+# Average price paid (book value / quantity)
+# --------------------------------------------------------------------------- #
+
+
+def _cost_source(exchange: str, qty: str, cost: str, currency: Currency) -> Holding:
+    """A position where only the book value matters."""
+    return Holding(
+        symbol="XYZ",
+        exchange=exchange,
+        asset_class=AssetClass.EQUITY,
+        quantity=Decimal(qty),
+        book_value=Money(Decimal(cost), currency),
+        market_value=Money(Decimal(qty) * 200, currency),
+    )
+
+
+def test_avg_cost_is_book_value_over_quantity() -> None:
+    holding = _cost_source("NASDAQ", "40", "1234.567891", Currency.USD)
+    unified = merge_holdings((holding,), Currency.CAD, _FX)[0]
+    cost = _native_avg_cost(unified, _FX)
+    assert cost == Money(Decimal("1234.567891") / 40, Currency.USD)
+
+
+def test_avg_cost_weights_by_shares_across_native_accounts() -> None:
+    # 30 @ 40 and 10 @ 20: the share-weighted mean (35), not the mean of means (30).
+    sources = (
+        _cost_source("NASDAQ", "30", "1200", Currency.USD),
+        _cost_source("NASDAQ", "10", "200", Currency.USD),
+    )
+    unified = merge_holdings(sources, Currency.CAD, _FX)[0]
+    cost = _native_avg_cost(unified, _FX)
+    assert cost is not None
+    assert cost.amount == Decimal("35")
+
+
+def test_avg_cost_covers_the_whole_position_across_currencies() -> None:
+    # Unlike price, cost differs per broker. 10 USD shares at $50 plus 90 shares
+    # bought through Wealthsimple (booked in CAD at $137.60 = $100 USD) must
+    # blend to ~$95, not report the 10-share Questrade lot alone as $50.
+    sources = (
+        _cost_source("", "10", "500", Currency.USD),
+        _cost_source("NASDAQ", "90", "12384", Currency.CAD),  # 90 x 137.60
+    )
+    unified = merge_holdings(sources, Currency.CAD, _FX)[0]
+    cost = _native_avg_cost(unified, _FX)
+
+    assert cost is not None
+    assert cost.currency is Currency.USD
+    assert cost.amount == pytest.approx(Decimal("95"), abs=Decimal("0.05"))
+
+
+def test_avg_cost_without_fx_refuses_rather_than_reporting_a_partial_lot() -> None:
+    sources = (
+        _cost_source("", "10", "500", Currency.USD),
+        _cost_source("NASDAQ", "90", "12384", Currency.CAD),
+    )
+    unified = merge_holdings(sources, Currency.CAD, _FX)[0]
+    assert _native_avg_cost(unified, None) is None
+
+
+def test_avg_cost_is_none_for_zero_quantity() -> None:
+    holding = _cost_source("NASDAQ", "0", "0", Currency.USD)
+    unified = merge_holdings((holding,), Currency.CAD, _FX)[0]
+    assert _native_avg_cost(unified, _FX) is None
+
+
+def test_row_formats_avg_cost_in_its_own_currency() -> None:
+    row = HoldingRow(
+        symbol="XYZ",
+        asset_class="equity",
+        quantity=Decimal("1"),
+        value=Money.of("1", CAD),
+        allocation=Decimal("0"),
+        avg_cost_native=Money(Decimal("12.3456"), Currency.USD),
+    )
+    assert row.avg_cost_text == "$12.35 USD"
+    no_cost = HoldingRow(
+        symbol="X",
+        asset_class="equity",
+        quantity=Decimal("1"),
+        value=Money.of("1", CAD),
+        allocation=Decimal("0"),
+    )
+    assert no_cost.avg_cost_text == "—"
+
+
+def test_view_model_rows_carry_avg_cost_in_both_currencies() -> None:
+    vm = view_model_for(_people(), CAD, PROVIDER)
+    priced = [r for r in vm.rows if r.avg_cost_native is not None]
+    assert priced  # the fixture has book values
+    for row in priced:
+        assert row.avg_cost_display is not None
+        assert row.avg_cost_display.currency is CAD

@@ -79,6 +79,40 @@ def _native_unit_price(holding: UnifiedHolding, provider: FxProvider | None = No
     return Money(converted.amount / holding.total_quantity, native)
 
 
+def _native_avg_cost(holding: UnifiedHolding, provider: FxProvider | None = None) -> Money | None:
+    """Average price paid per unit, in the security's native currency.
+
+    Derived from each source's book value (what the broker says the position
+    cost), divided by the shares it covers.
+
+    Unlike the unit price, cost genuinely *differs* between sources — the same
+    stock bought at two brokers has two cost bases — so this cannot simply
+    ignore the sources reporting in another currency the way
+    :func:`_native_unit_price` does. Showing one broker's average for a
+    position mostly held at the other would be worse than an FX approximation.
+    So the native sources are used alone only when they account for the whole
+    position; otherwise every source is converted and blended.
+
+    That blend puts today's rate against a historical cost, which is an
+    approximation for a position split across currencies. Returns None with no
+    sources, zero quantity, or no usable rate.
+    """
+    if not holding.sources or holding.total_quantity == 0:
+        return None
+    native = _native_currency(holding)
+    native_sources = [s for s in holding.sources if s.book_value.currency is native]
+    quantity = sum((s.quantity for s in native_sources), Decimal("0"))
+    if quantity == holding.total_quantity and quantity != 0:
+        cost = sum((s.book_value.amount for s in native_sources), Decimal("0"))
+        return Money(cost / quantity, native)
+    if provider is None:
+        return None
+    converted = Money.zero(native)
+    for source in holding.sources:
+        converted += convert(source.book_value, native, provider)
+    return Money(converted.amount / holding.total_quantity, native)
+
+
 def _high_52w_pct(holding: UnifiedHolding, provider: FxProvider | None = None) -> Decimal | None:
     """How far below the 52-week high the current price sits, as a fraction.
 
@@ -122,6 +156,8 @@ class HoldingRow:
     # this, because the column mixes currencies (USD for a NYSE listing, CAD
     # for a TSX one) and comparing raw numbers ranks 120 CAD above 100 USD.
     unit_price_display: Money | None = None
+    avg_cost_native: Money | None = None  # average price paid, original currency
+    avg_cost_display: Money | None = None  # the same, converted — sorted on this
 
     @property
     def allocation_pct(self) -> str:
@@ -139,6 +175,13 @@ class HoldingRow:
         if self.unit_price_native is None:
             return "—"
         return self.unit_price_native.format(places=2)
+
+    @property
+    def avg_cost_text(self) -> str:
+        """Average price paid, two decimals, in its original currency."""
+        if self.avg_cost_native is None:
+            return "—"
+        return self.avg_cost_native.format(places=2)
 
 
 @dataclass(frozen=True)
@@ -245,6 +288,12 @@ def build_dashboard_view_model(
                     unit_price_display=(
                         convert(native_price, snapshot.display_currency, provider)
                         if native_price is not None
+                        else None
+                    ),
+                    avg_cost_native=(avg_cost := _native_avg_cost(u, provider)),
+                    avg_cost_display=(
+                        convert(avg_cost, snapshot.display_currency, provider)
+                        if avg_cost is not None
                         else None
                     ),
                 )

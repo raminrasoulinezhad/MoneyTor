@@ -44,18 +44,35 @@ if TYPE_CHECKING:
     # below a string so nothing is evaluated at import time.
     from _typeshed import SupportsRichComparison
 
+# Headers are deliberately terse: every column but Name sizes to its contents,
+# so the label is usually what sets the width. "Allocation" is twice as wide as
+# any value under it. _HEADER_TOOLTIPS carries the full wording.
 _HEADERS = (
     "Symbol",
     "Name",
     "Sector",
     "Class",
-    "Quantity",
-    "Market Value",
-    "Allocation",
+    "Qty",
+    "Value",
+    "Alloc",
     "52WHG",
-    "Unit Price",
+    "Price",
+    "Avg Paid",
 )
+_HEADER_TOOLTIPS = {
+    4: "Quantity — shares held, rounded to 2 decimals",
+    5: "Market value in the display currency",
+    6: "Allocation — share of the total portfolio",
+    7: "52-week high gap — how far below the 52-week high the price sits",
+    8: "Current price per share, in the security's own currency",
+    9: "Average price paid per share, in the security's own currency",
+}
 _VALUE_COLUMN = 5  # default sort column (descending)
+# Fractional share counts carry a dozen decimals from the broker; two is plenty.
+_QUANTITY_PLACES = 2
+# Widest any one column may grow. Long names and sectors elide, with the full
+# text on hover.
+_MAX_COLUMN_WIDTH = 300
 # Text columns default to ascending when first sorted; numeric ones default to
 # descending (largest first), which is what you usually want for money/size.
 _TEXT_COLUMNS = frozenset({0, 1, 2, 3})
@@ -82,6 +99,7 @@ _SORT_KEYS: dict[int, Callable[[HoldingRow], SupportsRichComparison]] = {
     # mixes currencies, so raw numbers are not comparable. Falls back to the
     # native price when no converted one was supplied.
     8: lambda r: (r.unit_price_display or r.unit_price_native or _NO_MONEY).amount,
+    9: lambda r: (r.avg_cost_display or r.avg_cost_native or _NO_MONEY).amount,
 }
 
 
@@ -122,13 +140,19 @@ class HoldingsTable(QTableWidget):
         header = self.horizontalHeader()
         header.setSectionsClickable(True)
         header.setSortIndicatorShown(True)
+        for col, tip in _HEADER_TOOLTIPS.items():
+            item = self.horizontalHeaderItem(col)
+            if item is not None:
+                item.setToolTip(tip)
         header.setSortIndicator(self._sort_col, self._sort_order)
         header.sectionClicked.connect(self._on_section_clicked)
-        # The Name column absorbs spare width; the rest size to their content.
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        for col in range(len(_HEADERS)):
-            if col != 1:
-                header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+        # Every column sizes to its contents, capped. Name used to stretch into
+        # all the spare width — ~500px on a maximized window — while the numbers
+        # beside it were cramped; Qt's Stretch mode ignores a maximum, so it
+        # sizes to content like the rest. Long names and sectors elide, with the
+        # full text on hover. Spare width is left at the right edge.
+        header.setMaximumSectionSize(_MAX_COLUMN_WIDTH)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
 
     # ----------------------------------------------------------------- API --- #
 
@@ -191,11 +215,13 @@ class HoldingsTable(QTableWidget):
             self._set(r, 2, row.sector or "—")
             self._set(r, 3, format_asset_class(row.asset_class))
             # Per-holding share count and market value are hidden in private mode.
-            self._set(r, 4, PRIVATE_MASK if self._private else format_quantity(row.quantity), right)
+            quantity = format_quantity(row.quantity, places=_QUANTITY_PLACES)
+            self._set(r, 4, PRIVATE_MASK if self._private else quantity, right)
             self._set(r, 5, PRIVATE_MASK if self._private else row.value.format(), right)
             self._set(r, 6, row.allocation_pct, right)
             self._set(r, 7, row.high_52w_text, right)
             self._set(r, 8, row.unit_price_text, right)
+            self._set(r, 9, row.avg_cost_text, right)
             rank_item = QTableWidgetItem(str(rank))
             rank_item.setTextAlignment(right)
             self.setVerticalHeaderItem(r, rank_item)

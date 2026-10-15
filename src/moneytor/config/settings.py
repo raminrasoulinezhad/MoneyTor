@@ -14,8 +14,9 @@ Per-person credentials use a double-underscore namespace::
 
     MONEYTOR__<person>__<FIELD>=value
 
-e.g. ``MONEYTOR__ramin__WEALTHSIMPLE_EMAIL=...``. Recognised fields:
+e.g. ``MONEYTOR__alex__WEALTHSIMPLE_EMAIL=...``. Recognised fields:
 
+    NAME                      (optional display name, e.g. "Alex")
     QUESTRADE_REFRESH_TOKEN
     WEALTHSIMPLE_EMAIL
     WEALTHSIMPLE_PASSWORD
@@ -40,7 +41,8 @@ _PREFIX = "MONEYTOR__"
 _QUESTRADE_TOKEN = "QUESTRADE_REFRESH_TOKEN"
 _WS_EMAIL = "WEALTHSIMPLE_EMAIL"
 _WS_PASSWORD = "WEALTHSIMPLE_PASSWORD"
-_KNOWN_PERSON_FIELDS = frozenset({_QUESTRADE_TOKEN, _WS_EMAIL, _WS_PASSWORD})
+_NAME = "NAME"
+_KNOWN_PERSON_FIELDS = frozenset({_NAME, _QUESTRADE_TOKEN, _WS_EMAIL, _WS_PASSWORD})
 
 _VALID_LOG_LEVELS = frozenset({"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"})
 
@@ -53,6 +55,15 @@ class PersonCredentials:
     questrade_refresh_token: Secret | None = None
     wealthsimple_email: str | None = None
     wealthsimple_password: Secret | None = None
+    # What the app calls this person. Optional: the key segment
+    # (MONEYTOR__<person>__...) is an identifier, often a placeholder like
+    # PERSON1, so it is only the fallback.
+    name: str = ""
+
+    @property
+    def display_name(self) -> str:
+        """The configured name, else the person id capitalised."""
+        return self.name or self.person_id.capitalize()
 
     def secret_values(self) -> list[str]:
         """Revealed secret strings belonging to this person (for redaction)."""
@@ -151,6 +162,7 @@ def _build_person(person_id: str, fields: Mapping[str, str]) -> PersonCredential
         questrade_refresh_token=Secret(questrade) if questrade else None,
         wealthsimple_email=ws_email,
         wealthsimple_password=Secret(ws_password) if ws_password else None,
+        name=fields.get(_NAME, "").strip(),
     )
 
 

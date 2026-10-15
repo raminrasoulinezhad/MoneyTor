@@ -28,6 +28,7 @@ from moneytor.connectors import load_accounts
 from moneytor.connectors.errors import AuthError
 from moneytor.domain import AssetClass, Currency, Money, Person
 from moneytor.domain.enums import Institution
+from moneytor.formatting import PRIVATE_MASK
 from moneytor.fx import StaticFxProvider
 from moneytor.persistence.token_store import TokenStore
 from moneytor.ui import app as app_module
@@ -974,3 +975,155 @@ def test_unit_price_sorts_on_the_display_currency(qtbot) -> None:
     table.horizontalHeader().sectionClicked.emit(8)
 
     assert [table.item(r, 0).text() for r in range(table.rowCount())] == ["US100", "US90", "CA120"]
+
+
+# --------------------------------------------------------------------------- #
+# Average price paid, compact columns, configured names
+# --------------------------------------------------------------------------- #
+
+
+def test_avg_paid_column_shows_native_cost_and_sorts_on_display_currency(qtbot) -> None:
+    from moneytor.ui.viewmodels import HoldingRow
+
+    rate = Decimal("1.376")
+
+    def row(symbol: str, cost: str, currency: Currency) -> HoldingRow:
+        native = Money.of(cost, currency)
+        display = native if currency is CAD else Money(native.amount * rate, CAD)
+        return HoldingRow(
+            symbol=symbol,
+            asset_class="equity",
+            quantity=Decimal("1"),
+            value=Money.of("100", CAD),
+            allocation=Decimal("0.1"),
+            avg_cost_native=native,
+            avg_cost_display=display,
+        )
+
+    table = _make_table(
+        qtbot, [row("US100", "100", USD), row("CA120", "120", CAD), row("US90", "90", USD)]
+    )
+    assert table.horizontalHeaderItem(9).text() == "Avg Paid"
+    table.horizontalHeader().sectionClicked.emit(9)  # descending first
+
+    # 100 USD (~137.60 CAD) outranks 120 CAD; a raw-number sort would not.
+    assert _column(table, 0) == ["US100", "US90", "CA120"]
+    assert _column(table, 9) == ["$100.00 USD", "$90.00 USD", "$120.00 CAD"]
+
+
+def test_avg_paid_shows_a_dash_when_unknown(qtbot) -> None:
+    table = _make_table(qtbot, [_sort_row("AAA", "1", "10")])
+    assert _column(table, 9) == ["—"]
+
+
+def test_quantity_is_rounded_to_two_decimals_in_the_table(qtbot) -> None:
+    table = _make_table(
+        qtbot,
+        [_sort_row("AAA", "103.9999", "1"), _sort_row("BBB", "22.7106", "2")],
+    )
+    assert sorted(_column(table, 4)) == ["104", "22.71"]
+
+
+def test_quantity_sort_uses_the_exact_value_not_the_rounded_text(qtbot) -> None:
+    # 1.004 and 1.001 both display as "1"; the order must still be exact.
+    table = _make_table(qtbot, [_sort_row("LOW", "1.001", "1"), _sort_row("HIGH", "1.004", "2")])
+    table.horizontalHeader().sectionClicked.emit(4)
+    assert _column(table, 0) == ["HIGH", "LOW"]
+
+
+def test_rounded_quantity_is_still_masked_in_private_mode(qtbot) -> None:
+    table = _make_table(qtbot, [_sort_row("AAA", "103.9999", "1")])
+    table.set_private(True)
+    assert _column(table, 4) == [PRIVATE_MASK]
+
+
+def test_name_column_is_capped_on_a_wide_table(qtbot) -> None:
+    from moneytor.ui.viewmodels import HoldingRow
+    from moneytor.ui.widgets import holdings_table
+
+    long_name = "A VERY LONG COMPANY NAME THAT WOULD OTHERWISE TAKE HALF THE TABLE INC"
+    table = _make_table(
+        qtbot,
+        [
+            HoldingRow(
+                symbol="LONG",
+                name=long_name,
+                asset_class="equity",
+                quantity=Decimal("1"),
+                value=Money.of("1", CAD),
+                allocation=Decimal("0"),
+            )
+        ],
+    )
+    table.resize(2400, 600)
+    table.show()
+    qtbot.waitExposed(table)
+
+    assert table.horizontalHeader().sectionSize(1) <= holdings_table._MAX_COLUMN_WIDTH
+    assert table.item(0, 1).toolTip() == long_name  # elided text stays reachable
+
+
+def test_terse_headers_carry_their_full_meaning_as_tooltips(qtbot) -> None:
+    table = _make_table(qtbot, [])
+    tips = {
+        table.horizontalHeaderItem(c).text(): table.horizontalHeaderItem(c).toolTip()
+        for c in range(table.columnCount())
+    }
+    assert tips["Qty"].startswith("Quantity")
+    assert tips["Alloc"].startswith("Allocation")
+    assert "52-week high" in tips["52WHG"]
+    assert "paid" in tips["Avg Paid"]
+
+
+def test_sidebar_is_narrower_than_before(qtbot) -> None:
+    from moneytor.ui.widgets.sidebar import SIDEBAR_WIDTH, Sidebar
+
+    sidebar = Sidebar()
+    qtbot.addWidget(sidebar)
+    assert SIDEBAR_WIDTH < 300
+    assert sidebar.width() == SIDEBAR_WIDTH
+
+
+def test_live_people_use_the_configured_display_names(monkeypatch) -> None:
+    accounts = load_accounts(FIXTURE)
+    settings = Settings(
+        people=(
+            PersonCredentials(
+                person_id="person1", questrade_refresh_token=Secret("t1"), name="Alex"
+            ),
+            PersonCredentials(person_id="person2", questrade_refresh_token=Secret("t2")),
+        )
+    )
+    monkeypatch.setattr(
+        app_module,
+        "_connectors_for",
+        lambda creds, token_store, otp_provider=None: [
+            _FakeConnector(Institution.QUESTRADE, accounts)
+        ],
+    )
+    labels: list[str] = []
+    people = app_module.live_people(
+        settings, TokenStore(), report=lambda d, t, label: labels.append(label)
+    )
+
+    assert {p.id: p.name for p in people} == {"person1": "Alex", "person2": "Person2"}
+    assert labels[0] == "Fetching Alex — Questrade"
+
+
+def test_cached_people_are_renamed_from_config() -> None:
+    accounts = load_accounts(FIXTURE)
+    cached = (
+        Person(id="person1", name="Person1", accounts=accounts),
+        Person(id="person2", name="Person2", accounts=accounts),
+    )
+    settings = Settings(
+        people=(
+            PersonCredentials(
+                person_id="person1", questrade_refresh_token=Secret("t"), name="Alex"
+            ),
+        )
+    )
+
+    renamed = app_module.apply_configured_names(cached, settings)
+    assert [p.name for p in renamed] == ["Alex", "Person2"]  # unnamed person untouched
+    assert renamed[0].accounts == accounts

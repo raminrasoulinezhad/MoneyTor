@@ -44,7 +44,7 @@ from moneytor.ui.widgets.kpi_panel import KpiPanel
 from moneytor.ui.widgets.lock_screen import LockScreen
 from moneytor.ui.widgets.progress_bar import FetchProgressBar
 from moneytor.ui.widgets.settings_dialog import SettingsDialog
-from moneytor.ui.widgets.sidebar import Sidebar
+from moneytor.ui.widgets.sidebar import SIDEBAR_WIDTH, Sidebar
 from moneytor.ui.workers import FetchWorker
 
 PeopleLoader = Callable[[], tuple[Person, ...]]
@@ -129,7 +129,7 @@ class MainWindow(QMainWindow):
         # Left column: KPI cards on top, then the family/account tree below.
         left_column = QWidget()
         left_column.setObjectName("LeftColumn")
-        left_column.setFixedWidth(300)
+        left_column.setFixedWidth(SIDEBAR_WIDTH)
         left_layout = QVBoxLayout(left_column)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(0)

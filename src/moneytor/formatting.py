@@ -8,17 +8,23 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 # Placeholder shown in place of sensitive monetary values when private mode is on.
 PRIVATE_MASK = "••••••"
 
 
-def format_quantity(quantity: Decimal) -> str:
+def format_quantity(quantity: Decimal, places: int | None = None) -> str:
     """Format a share quantity with thousands separators, trimming only
     *fractional* trailing zeros (so ``Decimal("10")`` stays ``"10"``, not
     ``"1"``, while ``Decimal("10.50")`` becomes ``"10.5"``).
+
+    ``places`` caps the fractional digits, rounding half-up. Fractional share
+    counts can carry a dozen decimals, which is noise in a dense table — but
+    the default stays exact, since a report should not quietly round holdings.
     """
+    if places is not None:
+        quantity = quantity.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)
     text = f"{quantity:,f}"
     if "." in text:
         text = text.rstrip("0").rstrip(".")

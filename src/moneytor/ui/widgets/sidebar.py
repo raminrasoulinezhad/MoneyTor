@@ -26,6 +26,10 @@ from moneytor.ui.viewmodels import SidebarModel
 
 _ACCOUNT_ID_ROLE = Qt.ItemDataRole.UserRole
 
+# Wide enough for a person's name and an account label; the width the
+# dashboard gives up for it is width the holdings table does not get.
+SIDEBAR_WIDTH = 250
+
 
 class Sidebar(QWidget):
     """Family/account selector panel."""
@@ -35,11 +39,11 @@ class Sidebar(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("Sidebar")
-        self.setFixedWidth(300)
+        self.setFixedWidth(SIDEBAR_WIDTH)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
 
         title = QLabel("Accounts")
         title.setObjectName("SidebarTitle")

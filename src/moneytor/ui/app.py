@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import sys
 from collections.abc import Mapping
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -61,6 +62,21 @@ def _load_sector_map() -> SectorMap:
         except (OSError, ValueError) as exc:
             _LOG.warning("Ignoring invalid sector map %s: %s", _SECTOR_MAP_PATH, exc)
     return SectorMap({**DEFAULT_SECTORS, **overrides})
+
+
+def apply_configured_names(people: tuple[Person, ...], settings: Settings) -> tuple[Person, ...]:
+    """Rename each person to the ``NAME`` configured for them in ``.env``.
+
+    The snapshot cache stores whatever name was current when it was written, so
+    without this a cached launch keeps showing the old one — a placeholder like
+    "Person1" — until the next live fetch. People without a configured name,
+    and the demo portfolio, are left as they are.
+    """
+    names = {creds.person_id: creds.name for creds in settings.people if creds.name}
+    return tuple(
+        replace(person, name=names[person.id]) if person.id in names else person
+        for person in people
+    )
 
 
 def demo_people() -> tuple[Person, ...]:
@@ -143,17 +159,18 @@ def live_people(
     total = len(jobs)
 
     accounts_by_person: dict[str, list[Account]] = {}
+    names = {creds.person_id: creds.display_name for creds in settings.people}
     for done, (creds, connector) in enumerate(jobs):
         if report is not None:
             institution = connector.institution.value.capitalize()
-            report(done, total, f"Fetching {creds.person_id.capitalize()} — {institution}")
+            report(done, total, f"Fetching {creds.display_name} — {institution}")
         connector.authenticate()
         accounts_by_person.setdefault(creds.person_id, []).extend(connector.fetch_accounts())
     if report is not None:
         report(total, total, "Finalizing")
 
     return tuple(
-        Person(id=person_id, name=person_id.capitalize(), accounts=tuple(accounts))
+        Person(id=person_id, name=names[person_id], accounts=tuple(accounts))
         for person_id, accounts in accounts_by_person.items()
         if accounts
     )
@@ -225,7 +242,8 @@ def run_app(argv: list[str] | None = None) -> int:
         # would otherwise stay "Unknown" until the next live fetch.
         cached = cache.load()
         if cached is not None:
-            window.set_people(apply_sector_map(cached.people, sector_map))
+            people = apply_configured_names(cached.people, settings)
+            window.set_people(apply_sector_map(people, sector_map))
         elif not has_credentials:
             window.set_people(apply_sector_map(demo_people(), sector_map))
         # With credentials but no cache, fetch live immediately (off-thread, with

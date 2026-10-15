@@ -91,7 +91,7 @@ Open `.env` and fill it in.
 | `MONEYTOR_APP_PASSWORD` | Password asked on launch. Leave blank for no lock |
 
 **Accounts** — one block per person. Replace `PERSON1` with a short name like
-`RAMIN`. Add as many people as you like.
+`ALEX`. Add as many people as you like.
 
 ```dotenv
 # Wealthsimple
@@ -103,6 +103,7 @@ MONEYTOR__PERSON1__QUESTRADE_REFRESH_TOKEN=your-refresh-token
 ```
 
 - A person can have Wealthsimple, Questrade, or both
+- Add `MONEYTOR__PERSON1__NAME=Alex` to show a real name instead of "Person1"
 - Wealthsimple may text you a 2FA code on first connection — MoneyTor will ask for it
 - 🔒 **Never share `.env`.** It holds real passwords. It is already gitignored
 
