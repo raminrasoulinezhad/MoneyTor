@@ -262,6 +262,29 @@ def _sidebar_from(people: tuple[Person, ...]) -> SidebarModel:
     )
 
 
+def _holding_row(
+    holding: UnifiedHolding, allocation: Decimal, display: Currency, provider: FxProvider
+) -> HoldingRow:
+    """One table row. Prices stay native for display; each also carries a
+    display-currency twin so the mixed-currency columns sort correctly."""
+    price = _native_unit_price(holding, provider)
+    cost = _native_avg_cost(holding, provider)
+    return HoldingRow(
+        symbol=holding.symbol,
+        name=holding.name,
+        sector=holding.sector,
+        asset_class=holding.asset_class.value,
+        quantity=holding.total_quantity,
+        value=holding.total_market_value,
+        allocation=allocation,
+        high_52w_pct=_high_52w_pct(holding, provider),
+        unit_price_native=price,
+        unit_price_display=convert(price, display, provider) if price is not None else None,
+        avg_cost_native=cost,
+        avg_cost_display=convert(cost, display, provider) if cost is not None else None,
+    )
+
+
 def build_dashboard_view_model(
     snapshot: PortfolioSnapshot, provider: FxProvider
 ) -> DashboardViewModel:
@@ -275,28 +298,7 @@ def build_dashboard_view_model(
     rows = tuple(
         sorted(
             (
-                HoldingRow(
-                    symbol=u.symbol,
-                    name=u.name,
-                    sector=u.sector,
-                    asset_class=u.asset_class.value,
-                    quantity=u.total_quantity,
-                    value=u.total_market_value,
-                    allocation=allocations.get(u.symbol, Decimal("0")),
-                    high_52w_pct=_high_52w_pct(u, provider),
-                    unit_price_native=(native_price := _native_unit_price(u, provider)),
-                    unit_price_display=(
-                        convert(native_price, snapshot.display_currency, provider)
-                        if native_price is not None
-                        else None
-                    ),
-                    avg_cost_native=(avg_cost := _native_avg_cost(u, provider)),
-                    avg_cost_display=(
-                        convert(avg_cost, snapshot.display_currency, provider)
-                        if avg_cost is not None
-                        else None
-                    ),
-                )
+                _holding_row(u, allocations.get(u.symbol, Decimal("0")), currency, provider)
                 for u in snapshot.unified_holdings
             ),
             key=lambda r: r.value.amount,
