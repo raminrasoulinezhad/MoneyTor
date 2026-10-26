@@ -88,4 +88,13 @@ LIGHT = ThemeTokens(
     accent_hover="#10b981",
     positive="#16a34a",
     negative="#dc2626",
+    # The dark theme's slices are too faint on white (TFSA, FHSA and Other
+    # under 3:1); the same hues one or two shades deeper all clear it.
+    account_colors=(
+        "#059669",  # emerald-600 — TFSA
+        "#2563eb",  # blue-600 — RRSP
+        "#d97706",  # amber-600 — FHSA
+        "#9333ea",  # violet-600 — Margin & Cash
+        "#64748b",  # slate-500 — Other
+    ),
 )

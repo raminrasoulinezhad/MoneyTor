@@ -26,6 +26,16 @@ def build_qss(t: ThemeTokens) -> str:
     }}
     QMainWindow, #Root {{ background: {t.bg}; }}
 
+    /* Tooltips. The rule above gives every widget the theme's text colour,
+       tooltips included, but nothing set their background — so dark theme
+       drew near-white text on Qt's pale-yellow default, unreadable. */
+    QToolTip {{
+        background: {t.surface};
+        color: {t.text};
+        border: 1px solid {t.border};
+        padding: 6px 8px;
+    }}
+
     /* Sidebar */
     #Sidebar {{
         background: {t.surface};

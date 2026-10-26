@@ -12,7 +12,7 @@ import moneytor
 
 
 def test_version_is_exposed() -> None:
-    assert moneytor.__version__ == "1.7.0"
+    assert moneytor.__version__ == "1.7.1"
 
 
 def test_package_metadata_version_matches_dunder_version() -> None:

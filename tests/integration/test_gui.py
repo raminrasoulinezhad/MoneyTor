@@ -1729,3 +1729,42 @@ def test_pie_slices_always_close_the_circle(qtbot) -> None:
     image = table.viewport().grab().toImage()
     just_left_of_noon = image.pixelColor(rect.center().x() - 1, rect.center().y() - 5)
     assert just_left_of_noon == QColor(DARK.account_colors[2])  # FHSA, the last slice
+
+
+@pytest.mark.parametrize("theme_name", ["dark", "light"])
+def test_the_accounts_legend_tooltip_is_readable(qapp, qtbot, theme_name: str) -> None:
+    # Rendered for real: in dark theme the text used to be near-white on Qt's
+    # pale-yellow tooltip background.
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QColor
+    from PySide6.QtWidgets import QToolTip, QWidget
+
+    from moneytor.ui.theme import build_qss
+    from moneytor.ui.theme.tokens import DARK, LIGHT
+    from moneytor.ui.widgets.account_pie import legend_html
+
+    tokens = DARK if theme_name == "dark" else LIGHT
+    previous = qapp.styleSheet()
+    qapp.setStyleSheet(build_qss(tokens))
+    try:
+        anchor = QWidget()
+        qtbot.addWidget(anchor)
+        anchor.show()
+        QToolTip.showText(QPoint(20, 20), legend_html(tokens), anchor)
+        qtbot.waitUntil(lambda: QToolTip.isVisible(), timeout=2000)
+        tip = next(w for w in qapp.topLevelWidgets() if w.metaObject().className() == "QTipLabel")
+        image = tip.grab().toImage()
+
+        background = image.pixelColor(3, image.height() // 2)
+        assert background == QColor(tokens.surface)
+        # The text must be a colour far from the background: find the pixel
+        # with the greatest lightness difference and require a real gap.
+        gap = max(
+            abs(image.pixelColor(x, y).lightness() - background.lightness())
+            for x in range(0, image.width(), 2)
+            for y in range(0, image.height(), 2)
+        )
+        assert gap > 150
+    finally:
+        QToolTip.hideText()
+        qapp.setStyleSheet(previous)
