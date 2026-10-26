@@ -86,6 +86,7 @@ class DashboardView(QWidget):
 
     def set_theme_tokens(self, tokens: ThemeTokens) -> None:
         """Set the palette used for the charts and re-render them if data exists."""
+        self.table.set_theme_tokens(tokens)
         self._tokens = tokens
         if self._last_rows:
             for chart in self._charts:

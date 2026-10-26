@@ -88,6 +88,9 @@ class UnifiedHolding:
     sector: str = ""
     high_52w: Money | None = None
     dividend_yield: Decimal | None = None  # annual dividend yield as a fraction (0.025 = 2.5%)
+    # The merged market value held in each account type, in the snapshot's
+    # display currency. Sums to total_market_value (before rounding).
+    value_by_account_type: Mapping[AccountType, Money] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

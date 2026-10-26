@@ -12,6 +12,7 @@ Run headlessly via ``QT_QPA_PLATFORM=offscreen`` (set in conftest). ``qtbot``
 
 from __future__ import annotations
 
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -20,6 +21,7 @@ import pytest
 pytest.importorskip("pytestqt")
 
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QHeaderView
 
 from moneytor.autostart import AutostartError
 from moneytor.config.secret import Secret
@@ -27,7 +29,7 @@ from moneytor.config.settings import PersonCredentials, Settings
 from moneytor.connectors import load_accounts
 from moneytor.connectors.errors import AuthError
 from moneytor.domain import AssetClass, Currency, Money, Person
-from moneytor.domain.enums import Institution
+from moneytor.domain.enums import AccountType, Institution
 from moneytor.formatting import PRIVATE_MASK
 from moneytor.fx import StaticFxProvider
 from moneytor.persistence.token_store import TokenStore
@@ -1127,3 +1129,227 @@ def test_cached_people_are_renamed_from_config() -> None:
     renamed = app_module.apply_configured_names(cached, settings)
     assert [p.name for p in renamed] == ["Alex", "Person2"]  # unnamed person untouched
     assert renamed[0].accounts == accounts
+
+
+def _merged_row(symbol: str, listings: tuple[str, ...]):
+    from moneytor.ui.viewmodels import HoldingRow
+
+    return HoldingRow(
+        symbol=symbol,
+        name="Cameco Corporation" if symbol == "CCO" else symbol,
+        asset_class="equity",
+        quantity=Decimal("1"),
+        value=Money.of("1", CAD),
+        allocation=Decimal("0"),
+        listings=listings,
+    )
+
+
+def test_merged_symbol_names_its_listings_on_hover(qtbot) -> None:
+    table = _make_table(qtbot, [_merged_row("CCO", ("CCO", "CCJ")), _merged_row("SHOP", ("SHOP",))])
+    tips = {table.item(r, 0).text(): table.item(r, 0).toolTip() for r in range(2)}
+    assert tips["CCO"] == "Merged listings: CCO, CCJ"
+    assert tips["SHOP"] == ""  # nothing merged, nothing to explain
+
+
+def test_search_finds_a_merged_row_by_its_other_ticker(qtbot) -> None:
+    table = _make_table(qtbot, [_merged_row("CCO", ("CCO", "CCJ")), _merged_row("SHOP", ("SHOP",))])
+    table.set_filter("ccj")
+    assert _column(table, 0) == ["CCO"]
+
+
+def test_app_merges_bundled_and_user_listing_groups(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "listings.json"
+    path.write_text('[["ABX", "B"], ["XYZ", "CCJ"]]', encoding="utf-8")
+    monkeypatch.setattr(app_module, "_LISTINGS_PATH", path)
+
+    asset_map = app_module._load_asset_map()
+    assert asset_map.canonical("CCJ") == "CCO"  # bundled grouping wins
+    assert asset_map.canonical("B") == "ABX"  # user group added
+
+
+def test_app_ignores_an_invalid_listings_file(tmp_path, monkeypatch, caplog) -> None:
+    path = tmp_path / "listings.json"
+    path.write_text("{not json", encoding="utf-8")
+    monkeypatch.setattr(app_module, "_LISTINGS_PATH", path)
+
+    asset_map = app_module._load_asset_map()
+    assert asset_map.canonical("CCJ") == "CCO"  # bundled groups still apply
+    assert "Ignoring invalid listing groups" in caplog.text
+
+
+def test_window_merges_listings_it_is_given(qtbot) -> None:
+    from moneytor.aggregation import AssetMap
+    from moneytor.domain.models import Account, Holding
+
+    def holding(symbol: str, value: str, currency: Currency) -> Holding:
+        return Holding(
+            symbol=symbol,
+            exchange="",
+            asset_class=AssetClass.EQUITY,
+            quantity=Decimal("1"),
+            book_value=Money.of(value, currency),
+            market_value=Money.of(value, currency),
+        )
+
+    account = Account(
+        id="a1",
+        person_id="p1",
+        institution=Institution.QUESTRADE,
+        account_type=AccountType.TFSA,
+        cash=Money.zero(CAD),
+        holdings=(holding("CCO.TO", "110", CAD), holding("CCJ", "80", USD)),
+    )
+    window = MainWindow(
+        people=(Person(id="p1", name="P", accounts=(account,)),),
+        provider=PROVIDER,
+        autostart=_FakeAutostart(),
+        asset_map=AssetMap.from_groups([["CCO", "CCJ"]]),
+    )
+    qtbot.addWidget(window)
+    table = window.dashboard.table
+    assert _column(table, 0) == ["CCO"]
+    assert _column(table, 4) == ["2"]
+
+
+# --------------------------------------------------------------------------- #
+# Search speed (the table used to be quadratic in its row count)
+# --------------------------------------------------------------------------- #
+
+
+def test_columns_are_not_continuously_auto_sized(qtbot) -> None:
+    # ResizeToContents re-measures every row whenever one cell is set, which
+    # made each render quadratic: 2-3 s per search keystroke at 160 holdings.
+    table = _make_table(qtbot, [])
+    resize_to_contents = QHeaderView.ResizeMode.ResizeToContents
+    header, gutter = table.horizontalHeader(), table.verticalHeader()
+    assert all(
+        header.sectionResizeMode(c) != resize_to_contents for c in range(table.columnCount())
+    )
+    assert gutter.sectionResizeMode(0) != resize_to_contents
+
+
+def test_columns_still_fit_their_contents_after_a_render(qtbot) -> None:
+    table = _make_table(qtbot, [_sort_row("A", "1", "1")])
+    narrow = table.horizontalHeader().sectionSize(0)
+    table.set_rows([_sort_row("AVERYLONGTICKER", "1", "1")])
+    assert table.horizontalHeader().sectionSize(0) > narrow
+
+
+def test_search_stays_fast_on_a_large_portfolio(qtbot) -> None:
+    import time
+
+    rows = [_sort_row(f"T{i:03d}", str(i + 1), str(i * 10 + 5)) for i in range(400)]
+    table = _make_table(qtbot, rows)
+    table.show()
+    qtbot.waitExposed(table)
+
+    start = time.perf_counter()
+    for query in ("t", "t1", "t12", "t1", "t", ""):
+        table.set_filter(query)
+    elapsed = time.perf_counter() - start
+    # Linear rendering takes ~0.2 s here; the quadratic version took ~20 s.
+    assert elapsed < 3.0, f"six searches over 400 rows took {elapsed:.1f}s"
+
+
+# --------------------------------------------------------------------------- #
+# Accounts column (tiny pie per row)
+# --------------------------------------------------------------------------- #
+
+
+def _mix_row(symbol: str, *mix: tuple[str, str]):
+    from moneytor.ui.viewmodels import AccountBucket, HoldingRow
+
+    return HoldingRow(
+        symbol=symbol,
+        asset_class="equity",
+        quantity=Decimal("1"),
+        value=Money.of("100", CAD),
+        allocation=Decimal("0.1"),
+        account_mix=tuple((AccountBucket[b], Decimal(s)) for b, s in mix),
+    )
+
+
+def _pie_center_color(table, row: int):
+    from moneytor.ui.widgets.holdings_table import _ACCOUNTS_COLUMN
+
+    rect = table.visualRect(table.model().index(row, _ACCOUNTS_COLUMN))
+    image = table.viewport().grab().toImage()
+    return image.pixelColor(rect.center())
+
+
+def test_accounts_column_paints_a_pie_in_the_buckets_colour(qtbot) -> None:
+    from PySide6.QtGui import QColor
+
+    from moneytor.ui.theme.tokens import DARK
+
+    table = _make_table(qtbot, [_mix_row("ALLTFSA", ("TFSA", "1"))])
+    table.resize(1600, 300)
+    table.show()
+    qtbot.waitExposed(table)
+
+    assert table.horizontalHeaderItem(10).text() == "Accounts"
+    assert _pie_center_color(table, 0) == QColor(DARK.account_colors[0])  # TFSA emerald
+
+
+def test_accounts_cell_has_no_text_and_a_split_tooltip(qtbot) -> None:
+    table = _make_table(qtbot, [_mix_row("X", ("TFSA", "0.6"), ("RRSP", "0.4"))])
+    cell = table.item(0, 10)
+    assert cell.text() == ""
+    assert "TFSA 60%" in cell.toolTip()
+    assert "RRSP 40%" in cell.toolTip()
+
+
+def test_accounts_header_tooltip_is_a_colour_legend(qtbot) -> None:
+    from moneytor.ui.theme.tokens import DARK
+
+    table = _make_table(qtbot, [])
+    legend = table.horizontalHeaderItem(10).toolTip()
+    for label in ("TFSA", "RRSP", "FHSA", "Margin &amp; Cash", "Other"):
+        assert label in legend
+    for color in DARK.account_colors:
+        assert color in legend
+
+
+def test_accounts_sort_clusters_rows_by_main_account(qtbot) -> None:
+    table = _make_table(
+        qtbot,
+        [
+            _mix_row("RRSPHEAVY", ("RRSP", "0.9"), ("TFSA", "0.1")),
+            _mix_row("NOSPLIT"),
+            _mix_row("HALFTFSA", ("TFSA", "0.5"), ("FHSA", "0.5")),
+            _mix_row("ALLTFSA", ("TFSA", "1")),
+        ],
+    )
+    table.horizontalHeader().sectionClicked.emit(10)  # ascending first
+    assert _column(table, 0) == ["ALLTFSA", "HALFTFSA", "RRSPHEAVY", "NOSPLIT"]
+
+
+def test_accounts_pie_follows_the_theme(qtbot) -> None:
+    from PySide6.QtGui import QColor
+
+    from moneytor.ui.theme.tokens import DARK
+
+    table = _make_table(qtbot, [_mix_row("ALLTFSA", ("TFSA", "1"))])
+    table.resize(1600, 300)
+    table.show()
+    qtbot.waitExposed(table)
+    recoloured = replace(DARK, account_colors=("#ff0000", *DARK.account_colors[1:]))
+    table.set_theme_tokens(recoloured)
+
+    assert _pie_center_color(table, 0) == QColor("#ff0000")
+    assert "#ff0000" in table.horizontalHeaderItem(10).toolTip()
+
+
+def test_accounts_pie_stays_visible_in_private_mode(qtbot) -> None:
+    table = _make_table(qtbot, [_mix_row("X", ("TFSA", "1"))])
+    table.set_private(True)
+    assert table.item(0, 10).toolTip()  # shares, not amounts — nothing to hide
+
+
+def test_every_theme_colours_every_account_bucket() -> None:
+    from moneytor.ui.theme.tokens import DARK, LIGHT
+    from moneytor.ui.viewmodels import AccountBucket
+
+    for tokens in (DARK, LIGHT):
+        assert len(tokens.account_colors) == len(AccountBucket)

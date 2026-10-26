@@ -17,9 +17,10 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from dataclasses import replace
 from decimal import Decimal
 
-from moneytor.domain.enums import AssetClass, Currency
+from moneytor.domain.enums import AccountType, AssetClass, Currency
 from moneytor.domain.models import Account, Holding, Person, PortfolioSnapshot
 from moneytor.domain.money import Money
 from moneytor.fx.convert import convert
@@ -145,6 +146,32 @@ def annual_gic_interest(snapshot: PortfolioSnapshot) -> Money:
     return total.quantize()
 
 
+def value_by_account_type(
+    people: Sequence[Person],
+    target: Currency,
+    provider: FxProvider,
+    asset_map: AssetMap | None = None,
+) -> dict[str, dict[AccountType, Money]]:
+    """Each canonical symbol's market value per account type, in ``target``.
+
+    Keyed exactly as :func:`merge_holdings` keys its rows, so the two line up.
+    Holdings, unlike their merged form, still know which account they sit in —
+    which is why this walks ``people`` rather than the unified holdings.
+    """
+    asset_map = asset_map or AssetMap()
+    result: dict[str, dict[AccountType, Money]] = {}
+    for person in people:
+        for account in person.accounts:
+            for holding in account.holdings:
+                symbol = asset_map.canonical(holding.symbol)
+                values = result.setdefault(symbol, {})
+                value = convert(holding.market_value, target, provider)
+                values[account.account_type] = (
+                    values.get(account.account_type, Money.zero(target)) + value
+                )
+    return result
+
+
 def build_snapshot(
     people: Sequence[Person],
     display_currency: Currency,
@@ -155,6 +182,9 @@ def build_snapshot(
     """Aggregate people's portfolios into a :class:`PortfolioSnapshot`."""
     holdings = collect_holdings(people)
     unified = merge_holdings(holdings, display_currency, provider, asset_map)
+    # Same map as the merge, so a merged row (CCO + CCJ) counts both listings.
+    by_type = value_by_account_type(people, display_currency, provider, asset_map)
+    unified = tuple(replace(u, value_by_account_type=by_type.get(u.symbol, {})) for u in unified)
     return PortfolioSnapshot(
         display_currency=display_currency,
         totals_by_currency=totals_by_currency(people),

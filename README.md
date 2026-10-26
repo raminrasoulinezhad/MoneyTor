@@ -30,9 +30,25 @@ dashboard with charts and exportable reports.
 | --- | --- |
 | **KPI cards** (left) | Total value, annual dividends, GIC interest, income, holdings count, top position |
 | **Charts** (center) | Two panels, each switching independently between holdings and sectors |
-| **Holdings table** (bottom) | Every position merged across accounts, with allocation %, 52-week high distance, unit price |
+| **Holdings table** (bottom) | Every position merged across accounts, with allocation %, 52-week high distance, price, average price paid, and a pie of which account types hold it |
 | **Sidebar** (left) | Toggle people and accounts on and off |
 | **⚙ Settings** (top right) | Theme, private mode, start at login, export |
+
+### The Accounts pie
+
+Each row's pie shows how that holding splits across account types, by value:
+
+| Colour | Account type |
+| --- | --- |
+| 🟢 Green | TFSA |
+| 🔵 Blue | RRSP (including spousal) |
+| 🟠 Amber | FHSA |
+| 🟣 Violet | Margin & Cash (non-registered) |
+| ⚪ Grey | Other (managed, GIC) |
+
+- Hover a pie for the exact split; hover the column header for the key
+- Click the header to group rows by their main account type
+- It follows the sidebar — untick an account and the pies update
 
 ### Why are the numbers hidden behind `••••••`?
 
@@ -40,7 +56,7 @@ That screenshot has **private mode** on — a privacy screen for when someone is
 looking over your shoulder.
 
 - Hides every dollar figure: total value, dividends, GIC interest, income, and each holding's shares and market value
-- Leaves the safe context visible: allocation %, sectors, unit prices
+- Leaves the safe context visible: allocation %, sectors, prices, the account pies
 - Turning it **on** is instant; turning it **off** needs your password
 
 ---
@@ -164,6 +180,39 @@ To correct or add one, create `.cache/sectors.json` — your entries beat all th
 - Changes apply on the next launch; no need to refetch
 
 Cash, GICs, bullion, and crypto are bucketed automatically and ignore this file.
+
+---
+
+## One company, two tickers
+
+A stock listed in Canada and the US under the **same** ticker (`AEM` and
+`AEM.TO`) already shows as one row. When the tickers differ, MoneyTor merges
+the ones it knows about into a single row:
+
+| Company | Shown as | Also includes |
+| --- | --- | --- |
+| Cameco | `CCO` | `CCJ` |
+| Fortuna Mining | `FVI` | `FSM` |
+| Altius Minerals | `ALS` | `ATUSF` |
+| West Red Lake Gold | `WRLG` | `WRLGF` |
+
+- Hover the symbol to see which tickers were merged
+- Searching either ticker finds the row
+- Price shows in the first ticker's currency; Avg Paid covers both
+
+To add your own, create `.cache/listings.json` — the first ticker in each group
+is the one shown:
+
+```json
+[
+  ["ABX", "B"]
+]
+```
+
+⚠️ **Only merge listings that are the same share, one for one.** Merging adds
+up share counts, so it is wrong for a US ADR traded at a ratio (often a `…Y`
+ticker) or a Canadian CDR. To check a pair: the Canadian price ÷ the US price
+should equal today's USD/CAD rate.
 
 ---
 

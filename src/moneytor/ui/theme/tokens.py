@@ -45,6 +45,16 @@ class ThemeTokens:
     font_size_metric: int = 22
     font_size_label: int = 11
 
+    # Accounts column slices, in AccountBucket order: TFSA, RRSP, FHSA,
+    # Margin & Cash, Other. Mid-saturation hues that read on either theme.
+    account_colors: tuple[str, str, str, str, str] = (
+        "#10b981",  # emerald — TFSA
+        "#3b82f6",  # blue — RRSP
+        "#f59e0b",  # amber — FHSA
+        "#a855f7",  # violet — Margin & Cash
+        "#94a3b8",  # slate — Other
+    )
+
     # Layout
     spacing: int = 10
     spacing_lg: int = 14

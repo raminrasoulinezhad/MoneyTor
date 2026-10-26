@@ -17,7 +17,13 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 
-from moneytor.aggregation import DEFAULT_SECTORS, SectorMap, apply_sector_map
+from moneytor.aggregation import (
+    DEFAULT_SECTORS,
+    EQUIVALENT_LISTINGS,
+    AssetMap,
+    SectorMap,
+    apply_sector_map,
+)
 from moneytor.config.errors import ConfigError
 from moneytor.config.logging import setup_logging
 from moneytor.config.settings import PersonCredentials, Settings, load_settings
@@ -47,6 +53,9 @@ _FIXTURE = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "mock_ac
 # Optional user-maintained ticker -> GICS sector overrides, layered over the
 # bundled DEFAULT_SECTORS (both fill gaps the brokers leave).
 _SECTOR_MAP_PATH = Path(".cache") / "sectors.json"
+# Optional user-maintained groups of tickers that are one company, layered after
+# the bundled EQUIVALENT_LISTINGS: [["CCO", "CCJ"], ...].
+_LISTINGS_PATH = Path(".cache") / "listings.json"
 
 
 def _load_sector_map() -> SectorMap:
@@ -62,6 +71,21 @@ def _load_sector_map() -> SectorMap:
         except (OSError, ValueError) as exc:
             _LOG.warning("Ignoring invalid sector map %s: %s", _SECTOR_MAP_PATH, exc)
     return SectorMap({**DEFAULT_SECTORS, **overrides})
+
+
+def _load_asset_map() -> AssetMap:
+    """The bundled one-company-two-tickers groups, plus the user's own.
+
+    The bundled groups come first, so a ticker the user lists again keeps its
+    bundled grouping rather than being split off.
+    """
+    groups: list[list[str]] = [list(g) for g in EQUIVALENT_LISTINGS]
+    if _LISTINGS_PATH.exists():
+        try:
+            groups.extend(AssetMap.groups_from_file(_LISTINGS_PATH))
+        except (OSError, ValueError) as exc:
+            _LOG.warning("Ignoring invalid listing groups %s: %s", _LISTINGS_PATH, exc)
+    return AssetMap.from_groups(groups)
 
 
 def apply_configured_names(people: tuple[Person, ...], settings: Settings) -> tuple[Person, ...]:
@@ -231,6 +255,7 @@ def run_app(argv: list[str] | None = None) -> int:
         provider=provider,
         display_currency=currency,
         loader=loader,
+        asset_map=_load_asset_map(),
     )
     otp_provider.parent_widget = window  # center the 2FA dialog on the window
     # Open filling the screen; the resize() in MainWindow is the restored-down size.

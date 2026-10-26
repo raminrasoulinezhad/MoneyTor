@@ -36,7 +36,15 @@ from PySide6.QtWidgets import (
 
 from moneytor.domain import Currency, Money
 from moneytor.formatting import PRIVATE_MASK, format_asset_class, format_quantity
-from moneytor.ui.viewmodels import HoldingRow
+from moneytor.ui.theme.tokens import DARK, ThemeTokens
+from moneytor.ui.viewmodels import AccountBucket, HoldingRow
+from moneytor.ui.widgets.account_pie import (
+    MIX_ROLE,
+    AccountMixDelegate,
+    Mix,
+    legend_html,
+    mix_html,
+)
 
 if TYPE_CHECKING:
     # typeshed's "anything sorted() accepts" protocol. It has no runtime module,
@@ -58,6 +66,7 @@ _HEADERS = (
     "52WHG",
     "Price",
     "Avg Paid",
+    "Accounts",
 )
 _HEADER_TOOLTIPS = {
     4: "Quantity — shares held, rounded to 2 decimals",
@@ -68,6 +77,7 @@ _HEADER_TOOLTIPS = {
     9: "Average price paid per share, in the security's own currency",
 }
 _VALUE_COLUMN = 5  # default sort column (descending)
+_ACCOUNTS_COLUMN = 10
 # Fractional share counts carry a dozen decimals from the broker; two is plenty.
 _QUANTITY_PLACES = 2
 # Widest any one column may grow. Long names and sectors elide, with the full
@@ -75,7 +85,7 @@ _QUANTITY_PLACES = 2
 _MAX_COLUMN_WIDTH = 300
 # Text columns default to ascending when first sorted; numeric ones default to
 # descending (largest first), which is what you usually want for money/size.
-_TEXT_COLUMNS = frozenset({0, 1, 2, 3})
+_TEXT_COLUMNS = frozenset({0, 1, 2, 3, _ACCOUNTS_COLUMN})
 # Free-text columns wide enough to be cut off by the one-line row height.
 _ELIDABLE_COLUMNS = frozenset({1, 2})
 # Sort key for cells with no value, so they cluster at the bottom of a
@@ -100,7 +110,20 @@ _SORT_KEYS: dict[int, Callable[[HoldingRow], SupportsRichComparison]] = {
     # native price when no converted one was supplied.
     8: lambda r: (r.unit_price_display or r.unit_price_native or _NO_MONEY).amount,
     9: lambda r: (r.avg_cost_display or r.avg_cost_native or _NO_MONEY).amount,
+    # Clusters rows by their main account group, in the fixed group order, and
+    # within a group puts the most concentrated first: all-TFSA rows lead.
+    _ACCOUNTS_COLUMN: lambda r: _mix_sort_key(r.account_mix),
 }
+
+
+_BUCKET_ORDER = tuple(AccountBucket)
+
+
+def _mix_sort_key(mix: Mix) -> tuple[int, Decimal]:
+    if not mix:
+        return (len(_BUCKET_ORDER), Decimal("0"))  # unsplittable rows sort last
+    bucket, share = mix[0]
+    return (_BUCKET_ORDER.index(bucket), -share)
 
 
 class HoldingsTable(QTableWidget):
@@ -117,6 +140,10 @@ class HoldingsTable(QTableWidget):
         # off — but the header stays clickable to drive our own sort.
         self.setSortingEnabled(False)
 
+        self._tokens: ThemeTokens = DARK
+        self._mix_delegate = AccountMixDelegate(self)
+        self.setItemDelegateForColumn(_ACCOUNTS_COLUMN, self._mix_delegate)
+
         self._rows: tuple[HoldingRow, ...] = ()
         self._query: str = ""
         self._private = False
@@ -132,7 +159,9 @@ class HoldingsTable(QTableWidget):
         # 1-based index (its standing in the full sorted set).
         vheader = self.verticalHeader()
         vheader.setVisible(True)
-        vheader.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        # Sized once per render (see _render), not continuously: in
+        # ResizeToContents mode Qt re-measures every row on each cell added.
+        vheader.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
         vheader.setHighlightSections(False)
         vheader.setDefaultAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self._label_rank_corner()
@@ -144,6 +173,7 @@ class HoldingsTable(QTableWidget):
             item = self.horizontalHeaderItem(col)
             if item is not None:
                 item.setToolTip(tip)
+        self._set_legend_tooltip()
         header.setSortIndicator(self._sort_col, self._sort_order)
         header.sectionClicked.connect(self._on_section_clicked)
         # Every column sizes to its contents, capped. Name used to stretch into
@@ -152,7 +182,11 @@ class HoldingsTable(QTableWidget):
         # sizes to content like the rest. Long names and sectors elide, with the
         # full text on hover. Spare width is left at the right edge.
         header.setMaximumSectionSize(_MAX_COLUMN_WIDTH)
-        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        # Not ResizeToContents: that mode re-measures every row each time a
+        # cell is set, which made a render quadratic in the row count — 2-3 s
+        # per search keystroke on a 160-holding portfolio. _render sizes the
+        # columns to their contents once, after filling.
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
 
     # ----------------------------------------------------------------- API --- #
 
@@ -164,6 +198,13 @@ class HoldingsTable(QTableWidget):
     def set_filter(self, query: str) -> None:
         """Show only rows matching ``query`` (by symbol or name); ranks unchanged."""
         self._query = query.strip().lower()
+        self._render()
+
+    def set_theme_tokens(self, tokens: ThemeTokens) -> None:
+        """Recolour the Accounts pies and their legend for ``tokens``' theme."""
+        self._tokens = tokens
+        self._mix_delegate.set_tokens(tokens)
+        self._set_legend_tooltip()
         self._render()
 
     def set_private(self, private: bool) -> None:
@@ -199,7 +240,9 @@ class HoldingsTable(QTableWidget):
     def _matches(self, row: HoldingRow) -> bool:
         if not self._query:
             return True
-        return self._query in row.symbol.lower() or self._query in row.name.lower()
+        # Every merged ticker counts, so searching "CCJ" finds Cameco's CCO row.
+        tickers = row.listings or (row.symbol,)
+        return any(self._query in t.lower() for t in tickers) or self._query in row.name.lower()
 
     def _render(self) -> None:
         # Rank over the full sorted set, then keep only matching rows — so a
@@ -208,9 +251,21 @@ class HoldingsTable(QTableWidget):
             (rank, row) for rank, row in enumerate(self._ordered_rows(), 1) if self._matches(row)
         ]
         right = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        self.setUpdatesEnabled(False)
+        try:
+            self._fill(visible, right)
+        finally:
+            self.resizeColumnsToContents()
+            self.setUpdatesEnabled(True)
+
+    def _fill(self, visible: list[tuple[int, HoldingRow]], right: Qt.AlignmentFlag) -> None:
         self.setRowCount(len(visible))
         for r, (rank, row) in enumerate(visible):
             self._set(r, 0, row.symbol)
+            if len(row.listings) > 1:
+                merged = self.item(r, 0)
+                if merged is not None:
+                    merged.setToolTip("Merged listings: " + ", ".join(row.listings))
             self._set(r, 1, row.name)
             self._set(r, 2, row.sector or "—")
             self._set(r, 3, format_asset_class(row.asset_class))
@@ -222,6 +277,14 @@ class HoldingsTable(QTableWidget):
             self._set(r, 7, row.high_52w_text, right)
             self._set(r, 8, row.unit_price_text, right)
             self._set(r, 9, row.avg_cost_text, right)
+            # Shares only, never amounts, so the pie stays visible in private mode.
+            self._set(r, _ACCOUNTS_COLUMN, "")
+            mix_item = self.item(r, _ACCOUNTS_COLUMN)
+            if mix_item is not None:
+                mix_item.setData(MIX_ROLE, row.account_mix)
+                mix_item.setToolTip(
+                    mix_html(row.account_mix, self._tokens) if row.account_mix else ""
+                )
             rank_item = QTableWidgetItem(str(rank))
             rank_item.setTextAlignment(right)
             self.setVerticalHeaderItem(r, rank_item)
@@ -241,6 +304,11 @@ class HoldingsTable(QTableWidget):
         if col in _ELIDABLE_COLUMNS:
             item.setToolTip(text)
         self.setItem(row, col, item)
+
+    def _set_legend_tooltip(self) -> None:
+        item = self.horizontalHeaderItem(_ACCOUNTS_COLUMN)
+        if item is not None:
+            item.setToolTip(legend_html(self._tokens))
 
     def _label_rank_corner(self) -> None:
         """Put ``#`` in the gutter's header corner (the top-left intersection).

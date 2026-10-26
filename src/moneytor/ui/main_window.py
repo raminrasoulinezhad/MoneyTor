@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from moneytor import __version__
-from moneytor.aggregation import build_snapshot
+from moneytor.aggregation import AssetMap, build_snapshot
 from moneytor.autostart import Autostart, AutostartError, autostart_for
 from moneytor.connectors.errors import ConnectorError
 from moneytor.domain.enums import Currency
@@ -71,6 +71,7 @@ class MainWindow(QMainWindow):
         loader: PeopleLoader | None = None,
         clock: Clock | None = None,
         autostart: Autostart | None = None,
+        asset_map: AssetMap | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -96,6 +97,8 @@ class MainWindow(QMainWindow):
         # Backend for the "open at login" toggle; injectable so tests never
         # touch the real user session configuration.
         self._autostart = autostart if autostart is not None else autostart_for()
+        # Which differently-named tickers are one company (CCO + CCJ).
+        self._asset_map = asset_map
         self._settings_dialog: SettingsDialog | None = None
 
         self._build_toolbar()
@@ -234,7 +237,11 @@ class MainWindow(QMainWindow):
     def refresh(self) -> None:
         """Rebuild the view-model for the current selection (KPIs + dashboard)."""
         view_model = view_model_for(
-            self._people, self._currency, self._provider, self._selected_ids
+            self._people,
+            self._currency,
+            self._provider,
+            self._selected_ids,
+            asset_map=self._asset_map,
         )
         self.kpi_panel.set_kpis(view_model.kpis)
         self.dashboard.set_view_model(view_model)
@@ -257,7 +264,9 @@ class MainWindow(QMainWindow):
         Returns the ``(markdown_path, pdf_path)`` written. The Markdown file is
         placed alongside the PDF with a ``.md`` suffix.
         """
-        snapshot = build_snapshot(self._people, self._currency, self._provider, as_of=self._clock())
+        snapshot = build_snapshot(
+            self._people, self._currency, self._provider, self._asset_map, as_of=self._clock()
+        )
         report = build_report(snapshot, self._provider)
         pdf = Path(pdf_path)
         markdown = pdf.with_suffix(".md")

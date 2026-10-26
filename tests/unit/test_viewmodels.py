@@ -8,21 +8,25 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
-from moneytor.aggregation import build_snapshot, merge_holdings
+from moneytor.aggregation import AssetMap, build_snapshot, merge_holdings
 from moneytor.connectors import load_accounts
-from moneytor.domain import AssetClass, Currency, Money, Person
-from moneytor.domain.models import Holding
+from moneytor.domain import AccountType, AssetClass, Currency, Institution, Money, Person
+from moneytor.domain.models import Account, Holding, UnifiedHolding
 from moneytor.fx import StaticFxProvider
 from moneytor.ui.viewmodels import (
+    AccountBucket,
     HoldingRow,
+    _account_mix,
     _high_52w_pct,
     _native_avg_cost,
     _native_unit_price,
+    account_bucket,
     build_dashboard_view_model,
     view_model_for,
 )
@@ -435,3 +439,171 @@ def test_view_model_rows_carry_avg_cost_in_both_currencies() -> None:
     for row in priced:
         assert row.avg_cost_display is not None
         assert row.avg_cost_display.currency is CAD
+
+
+# --------------------------------------------------------------------------- #
+# Merged interlistings (CCO on the TSX + CCJ on the NYSE)
+# --------------------------------------------------------------------------- #
+
+
+def _listing(symbol: str, exchange: str, qty: str, value: str, currency: Currency) -> Holding:
+    return Holding(
+        symbol=symbol,
+        exchange=exchange,
+        asset_class=AssetClass.EQUITY,
+        quantity=Decimal(qty),
+        book_value=Money(Decimal(value), currency),
+        market_value=Money(Decimal(value), currency),
+        high_52w=Money(Decimal(value) / Decimal(qty) * 2, currency),
+    )
+
+
+_CAMECO = AssetMap.from_groups([["CCO", "CCJ"]])
+_CCO = _listing("CCO.TO", "TSX", "10", "1100", Currency.CAD)  # 110 CAD/share
+_CCJ = _listing("CCJ", "NYSE", "4", "320", Currency.USD)  # 80 USD/share
+
+
+@pytest.mark.parametrize("order", [(_CCO, _CCJ), (_CCJ, _CCO)])
+def test_merged_row_prices_in_its_own_listings_currency(order: tuple[Holding, ...]) -> None:
+    # Whichever listing a broker returns first, the CCO row quotes in CAD.
+    unified = merge_holdings(order, Currency.CAD, _FX, _CAMECO)[0]
+    assert unified.symbol == "CCO"
+    assert _native_unit_price(unified, _FX) == Money(Decimal("110"), Currency.CAD)
+
+
+@pytest.mark.parametrize("order", [(_CCO, _CCJ), (_CCJ, _CCO)])
+def test_merged_row_52_week_gap_uses_the_matching_listings_high(
+    order: tuple[Holding, ...],
+) -> None:
+    # Each listing's high is twice its price, so the gap is exactly 50% when the
+    # CAD high is used — converting the USD one would drift with the FX rate.
+    unified = merge_holdings(order, Currency.CAD, _FX, _CAMECO)[0]
+    assert _high_52w_pct(unified, _FX) == Decimal("0.5")
+
+
+def test_merged_row_lists_its_tickers_own_first() -> None:
+    vm = view_model_for(_people_with(_CCJ, _CCO), Currency.CAD, _FX, asset_map=_CAMECO)
+    (row,) = vm.rows
+    assert row.listings == ("CCO", "CCJ")
+
+
+def test_ordinary_row_lists_only_itself() -> None:
+    vm = view_model_for(_people_with(_CCO), Currency.CAD, _FX)
+    assert vm.rows[0].listings == ("CCO",)
+
+
+def _people_with(*holdings: Holding) -> tuple[Person, ...]:
+    account = Account(
+        id="a1",
+        person_id="p1",
+        institution=Institution.QUESTRADE,
+        account_type=AccountType.TFSA,
+        cash=Money.zero(Currency.CAD),
+        holdings=holdings,
+    )
+    return (Person(id="p1", name="P", accounts=(account,)),)
+
+
+# --------------------------------------------------------------------------- #
+# Account split (the Accounts column)
+# --------------------------------------------------------------------------- #
+
+
+def _split(**values: str) -> UnifiedHolding:
+    by_type = {AccountType[k.upper()]: Money.of(v, Currency.CAD) for k, v in values.items()}
+    total = sum(by_type.values(), Money.zero(Currency.CAD))
+    return UnifiedHolding(
+        symbol="X",
+        asset_class=AssetClass.EQUITY,
+        total_quantity=Decimal("1"),
+        total_market_value=total,
+        value_by_account_type=by_type,
+    )
+
+
+@pytest.mark.parametrize(
+    ("account_type", "bucket"),
+    [
+        (AccountType.TFSA, AccountBucket.TFSA),
+        (AccountType.RRSP, AccountBucket.RRSP),
+        (AccountType.SPOUSAL_RRSP, AccountBucket.RRSP),
+        (AccountType.FHSA, AccountBucket.FHSA),
+        (AccountType.MARGIN, AccountBucket.NON_REGISTERED),
+        (AccountType.CASH, AccountBucket.NON_REGISTERED),
+        (AccountType.MANAGED, AccountBucket.OTHER),
+        (AccountType.GIC, AccountBucket.OTHER),
+    ],
+)
+def test_every_account_type_has_a_bucket(account_type: AccountType, bucket: AccountBucket) -> None:
+    assert account_bucket(account_type) is bucket
+
+
+def test_account_mix_is_fractions_largest_first() -> None:
+    mix = _account_mix(_split(tfsa="25", rrsp="50", margin="25"))
+    assert mix == (
+        (AccountBucket.RRSP, Decimal("0.5")),
+        (AccountBucket.TFSA, Decimal("0.25")),  # ties keep the fixed group order
+        (AccountBucket.NON_REGISTERED, Decimal("0.25")),
+    )
+    assert sum(share for _, share in mix) == 1
+
+
+def test_spousal_and_regular_rrsp_share_one_slice() -> None:
+    mix = _account_mix(_split(rrsp="30", spousal_rrsp="30", tfsa="40"))
+    assert dict(mix) == {AccountBucket.RRSP: Decimal("0.6"), AccountBucket.TFSA: Decimal("0.4")}
+
+
+def test_account_mix_is_empty_with_nothing_to_split() -> None:
+    assert _account_mix(_split()) == ()
+    assert _account_mix(_split(tfsa="0")) == ()
+
+
+def test_account_mix_text() -> None:
+    row = HoldingRow(
+        symbol="X",
+        asset_class="equity",
+        quantity=Decimal("1"),
+        value=Money.of("1", CAD),
+        allocation=Decimal("0"),
+        account_mix=(
+            (AccountBucket.TFSA, Decimal("0.625")),
+            (AccountBucket.RRSP, Decimal("0.375")),
+        ),
+    )
+    assert row.account_mix_text == "TFSA 62% · RRSP 38%"
+    assert replace(row, account_mix=()).account_mix_text == "—"
+
+
+def test_account_mix_follows_the_sidebar_selection() -> None:
+    tfsa_lot = replace(_CCO, symbol="CCO.TO")
+    people = (
+        Person(
+            id="p1",
+            name="P",
+            accounts=(
+                Account(
+                    id="tfsa",
+                    person_id="p1",
+                    institution=Institution.QUESTRADE,
+                    account_type=AccountType.TFSA,
+                    cash=Money.zero(Currency.CAD),
+                    holdings=(tfsa_lot,),
+                ),
+                Account(
+                    id="rrsp",
+                    person_id="p1",
+                    institution=Institution.QUESTRADE,
+                    account_type=AccountType.RRSP,
+                    cash=Money.zero(Currency.CAD),
+                    holdings=(tfsa_lot,),
+                ),
+            ),
+        ),
+    )
+    both = view_model_for(people, Currency.CAD, _FX)
+    assert dict(both.rows[0].account_mix) == {
+        AccountBucket.TFSA: Decimal("0.5"),
+        AccountBucket.RRSP: Decimal("0.5"),
+    }
+    only_tfsa = view_model_for(people, Currency.CAD, _FX, account_ids=frozenset({"tfsa"}))
+    assert only_tfsa.rows[0].account_mix == ((AccountBucket.TFSA, Decimal("1")),)

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -182,6 +182,11 @@ def _strip_exchange_suffix(symbol: str) -> str:
     return symbol
 
 
+def base_ticker(symbol: str) -> str:
+    """``symbol`` upper-cased, without a listing-venue suffix (``cve.to`` → ``CVE``)."""
+    return _strip_exchange_suffix(symbol.strip().upper())
+
+
 @dataclass(frozen=True)
 class AssetMap:
     """Case-insensitive ticker → canonical-symbol overrides."""
@@ -202,12 +207,45 @@ class AssetMap:
             raise ValueError(f"Asset map {path} must be a JSON object.")
         return cls(overrides=data)
 
+    @classmethod
+    def from_groups(cls, groups: Iterable[Sequence[str]]) -> AssetMap:
+        """Map every ticker in each group onto the group's first ticker.
+
+        ``[["CCO", "CCJ"]]`` merges Cameco's two listings under ``CCO``. A
+        ticker named in two groups keeps its first, so a later group (the
+        user's file, say) cannot silently split an earlier one.
+        """
+        overrides: dict[str, str] = {}
+        for group in groups:
+            tickers = [base_ticker(t) for t in group if t.strip()]
+            if len(tickers) < 2:
+                continue
+            for ticker in tickers:
+                overrides.setdefault(ticker, tickers[0])
+        return cls(overrides=overrides)
+
+    @classmethod
+    def groups_from_file(cls, path: str | Path) -> list[list[str]]:
+        """Read listing groups from a JSON file (``[["CCO", "CCJ"], ...]``)."""
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        valid = isinstance(data, list) and all(
+            isinstance(g, list) and all(isinstance(t, str) for t in g) for g in data
+        )
+        if not valid:
+            raise ValueError(f"Listing groups {path} must be a JSON list of lists of tickers.")
+        return [[str(t) for t in group] for group in data]
+
     def canonical(self, symbol: str) -> str:
-        """Return the canonical symbol for ``symbol``."""
+        """Return the canonical symbol for ``symbol``.
+
+        Looked up as given, then without its exchange suffix, so a group entry
+        for ``CCJ`` also catches a broker reporting ``CCJ.US``.
+        """
         key = symbol.strip().upper()
         if key in self.overrides:
             return self.overrides[key]
-        return _strip_exchange_suffix(key)
+        base = _strip_exchange_suffix(key)
+        return self.overrides.get(base, base)
 
 
 @dataclass(frozen=True)

@@ -16,6 +16,7 @@ import pytest
 
 from moneytor.aggregation import (
     DEFAULT_SECTORS,
+    EQUIVALENT_LISTINGS,
     GICS_SECTORS,
     AssetMap,
     SectorMap,
@@ -30,6 +31,7 @@ from moneytor.aggregation import (
     normalize_sector,
     person_value,
     totals_by_currency,
+    value_by_account_type,
 )
 from moneytor.aggregation.normalize import KNOWN_EXCHANGE_SUFFIXES
 from moneytor.connectors import load_accounts
@@ -44,6 +46,7 @@ from moneytor.domain import (
 )
 from moneytor.domain.models import Account
 from moneytor.fx import StaticFxProvider
+from moneytor.fx.convert import convert
 
 CAD = Currency.CAD
 USD = Currency.USD
@@ -691,3 +694,144 @@ def test_build_snapshot_applies_asset_map_override() -> None:
     )
     assert [u.symbol for u in snapshot.unified_holdings] == ["SHOP"]
     assert snapshot.unified_holdings[0].total_quantity == Decimal("2")
+
+
+# --------------------------------------------------------------------------- #
+# One company, two tickers (interlisted under different symbols)
+# --------------------------------------------------------------------------- #
+
+
+def test_groups_map_every_ticker_onto_the_first() -> None:
+    asset_map = AssetMap.from_groups([["CCO", "CCJ"]])
+    assert {asset_map.canonical(s) for s in ("CCO", "CCO.TO", "ccj", "CCJ.US")} == {"CCO"}
+
+
+def test_group_tickers_may_be_written_with_a_suffix() -> None:
+    asset_map = AssetMap.from_groups([["CCO.TO", "CCJ"]])
+    assert asset_map.canonical("CCJ") == "CCO"
+    assert asset_map.canonical("CCO") == "CCO"
+
+
+def test_single_ticker_and_blank_groups_are_ignored() -> None:
+    asset_map = AssetMap.from_groups([["SHOP"], [], ["  ", "CVE"]])
+    assert asset_map.overrides == {}
+
+
+def test_a_ticker_in_two_groups_keeps_its_first() -> None:
+    # A later (user) group must not silently pull CCJ away from Cameco.
+    asset_map = AssetMap.from_groups([["CCO", "CCJ"], ["XYZ", "CCJ"]])
+    assert asset_map.canonical("CCJ") == "CCO"
+    assert asset_map.canonical("XYZ") == "XYZ"
+
+
+def test_groups_from_file_reads_a_list_of_lists(tmp_path: Path) -> None:
+    path = tmp_path / "listings.json"
+    path.write_text('[["CCO", "CCJ"], ["FVI", "FSM"]]', encoding="utf-8")
+    assert AssetMap.groups_from_file(path) == [["CCO", "CCJ"], ["FVI", "FSM"]]
+
+
+@pytest.mark.parametrize("content", ['{"CCO": "CCJ"}', '["CCO", "CCJ"]', "[[1, 2]]", '[["A"], 3]'])
+def test_groups_from_file_rejects_other_shapes(tmp_path: Path, content: str) -> None:
+    path = tmp_path / "listings.json"
+    path.write_text(content, encoding="utf-8")
+    with pytest.raises(ValueError, match="list of lists"):
+        AssetMap.groups_from_file(path)
+
+
+def test_interlisted_merge_sums_shares_and_converted_value() -> None:
+    cco = _holding("CCO.TO", "TSX", CAD, "10", "1100.00")  # 110 CAD/share
+    ccj = _holding("CCJ", "NYSE", USD, "4", "320.00")  # 80 USD/share
+    unified = merge_holdings((cco, ccj), CAD, PROVIDER, AssetMap.from_groups([["CCO", "CCJ"]]))
+
+    assert len(unified) == 1
+    cameco = unified[0]
+    assert cameco.symbol == "CCO"
+    assert cameco.total_quantity == Decimal("14")
+    expected = Money.of("1100.00", CAD) + convert(Money.of("320.00", USD), CAD, PROVIDER)
+    assert cameco.total_market_value == expected.quantize()
+
+
+def test_interlisted_merge_never_changes_the_portfolio_total() -> None:
+    holdings = (
+        _holding("CCO.TO", "TSX", CAD, "10", "1100.00"),
+        _holding("CCJ", "NYSE", USD, "4", "320.00"),
+        _holding("FVI", "TSX", CAD, "100", "1284.00"),
+        _holding("FSM", "NYSE", USD, "50", "458.50"),
+        _holding("SHOP", "TSX", CAD, "2", "300.00"),
+    )
+    groups = AssetMap.from_groups(EQUIVALENT_LISTINGS)
+
+    def total(asset_map: AssetMap) -> Money:
+        merged = merge_holdings(holdings, CAD, PROVIDER, asset_map)
+        return sum((u.total_market_value for u in merged), Money.zero(CAD))
+
+    assert total(groups) == total(AssetMap())
+    assert len(merge_holdings(holdings, CAD, PROVIDER, groups)) == 3
+
+
+def test_bundled_listing_groups_are_well_formed() -> None:
+    seen: set[str] = set()
+    for group in EQUIVALENT_LISTINGS:
+        assert len(group) >= 2
+        for ticker in group:
+            # Written bare: a venue suffix would make the display ticker "CCO.TO".
+            assert ticker == ticker.strip().upper()
+            assert ticker.rpartition(".")[2] not in KNOWN_EXCHANGE_SUFFIXES
+            assert ticker not in seen, f"{ticker} appears in two groups"
+            seen.add(ticker)
+
+
+# --------------------------------------------------------------------------- #
+# Value per account type (the Accounts column's input)
+# --------------------------------------------------------------------------- #
+
+
+def _account(account_id: str, account_type: AccountType, *holdings: Holding) -> Account:
+    return Account(
+        id=account_id,
+        person_id="p1",
+        institution=Institution.QUESTRADE,
+        account_type=account_type,
+        cash=Money.zero(CAD),
+        holdings=holdings,
+    )
+
+
+def test_value_by_account_type_sums_each_type_in_the_target_currency() -> None:
+    people = (
+        Person(
+            id="p1",
+            name="P",
+            accounts=(
+                _account("a", AccountType.TFSA, _holding("SHOP", "TSX", CAD, "1", "100")),
+                _account("b", AccountType.TFSA, _holding("SHOP.TO", "TSX", CAD, "1", "50")),
+                _account("c", AccountType.RRSP, _holding("SHOP", "NYSE", USD, "1", "100")),
+            ),
+        ),
+    )
+    values = value_by_account_type(people, CAD, PROVIDER)
+    assert values["SHOP"][AccountType.TFSA] == Money.of("150", CAD)
+    assert values["SHOP"][AccountType.RRSP] == convert(Money.of("100", USD), CAD, PROVIDER)
+
+
+def test_value_by_account_type_follows_listing_merges() -> None:
+    people = (
+        Person(
+            id="p1",
+            name="P",
+            accounts=(
+                _account("a", AccountType.TFSA, _holding("CCO.TO", "TSX", CAD, "1", "110")),
+                _account("b", AccountType.MARGIN, _holding("CCJ", "NYSE", USD, "1", "80")),
+            ),
+        ),
+    )
+    values = value_by_account_type(people, CAD, PROVIDER, AssetMap.from_groups([["CCO", "CCJ"]]))
+    assert set(values) == {"CCO"}
+    assert set(values["CCO"]) == {AccountType.TFSA, AccountType.MARGIN}
+
+
+def test_snapshot_holdings_carry_a_split_that_sums_to_their_value() -> None:
+    snapshot = build_snapshot(_fixture_people(), CAD, PROVIDER)
+    for unified in snapshot.unified_holdings:
+        split = sum(unified.value_by_account_type.values(), Money.zero(CAD))
+        assert split.quantize() == unified.total_market_value

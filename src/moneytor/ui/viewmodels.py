@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from decimal import Decimal
+from enum import StrEnum
 
 from moneytor.aggregation import (
     allocation_by_symbol,
@@ -23,12 +24,59 @@ from moneytor.aggregation import (
     build_snapshot,
     person_value,
 )
-from moneytor.aggregation.normalize import currency_for_exchange
-from moneytor.domain.enums import Currency
+from moneytor.aggregation.normalize import AssetMap, base_ticker, currency_for_exchange
+from moneytor.domain.enums import AccountType, Currency
 from moneytor.domain.models import Person, PortfolioSnapshot, UnifiedHolding
 from moneytor.domain.money import Money
 from moneytor.fx.convert import convert
 from moneytor.fx.provider import FxProvider
+
+
+class AccountBucket(StrEnum):
+    """The account groups the Accounts column distinguishes, in display order."""
+
+    TFSA = "TFSA"
+    RRSP = "RRSP"
+    FHSA = "FHSA"
+    NON_REGISTERED = "Margin & Cash"
+    OTHER = "Other"
+
+
+# Spousal RRSPs are RRSPs for this purpose. Wealthsimple's "Cash" account is a
+# plain non-registered account, taxed like margin, so the two share a bucket.
+_ACCOUNT_BUCKETS: dict[AccountType, AccountBucket] = {
+    AccountType.TFSA: AccountBucket.TFSA,
+    AccountType.RRSP: AccountBucket.RRSP,
+    AccountType.SPOUSAL_RRSP: AccountBucket.RRSP,
+    AccountType.FHSA: AccountBucket.FHSA,
+    AccountType.MARGIN: AccountBucket.NON_REGISTERED,
+    AccountType.CASH: AccountBucket.NON_REGISTERED,
+}
+
+
+def account_bucket(account_type: AccountType) -> AccountBucket:
+    """Which Accounts-column group ``account_type`` belongs to."""
+    return _ACCOUNT_BUCKETS.get(account_type, AccountBucket.OTHER)
+
+
+def _account_mix(holding: UnifiedHolding) -> tuple[tuple[AccountBucket, Decimal], ...]:
+    """The share of ``holding``'s value in each account group, largest first.
+
+    Fractions of the holding's own value, so they sum to 1. Empty when there is
+    nothing to split (no value, or a net value of zero or less).
+    """
+    totals: dict[AccountBucket, Decimal] = {}
+    for account_type, value in holding.value_by_account_type.items():
+        bucket = account_bucket(account_type)
+        totals[bucket] = totals.get(bucket, Decimal("0")) + value.amount
+    grand = sum(totals.values(), Decimal("0"))
+    if grand <= 0:
+        return ()
+    order = list(AccountBucket)
+    shares = [(b, v / grand) for b, v in totals.items() if v > 0]
+    # Largest first; ties fall back to the fixed bucket order, so a row's slices
+    # never reshuffle between refreshes.
+    return tuple(sorted(shares, key=lambda bs: (-bs[1], order.index(bs[0]))))
 
 
 def _native_currency(holding: UnifiedHolding) -> Currency:
@@ -39,11 +87,15 @@ def _native_currency(holding: UnifiedHolding) -> Currency:
     (Wealthsimple returns every position in CAD). Falls back to the first
     source's reported currency when no source names a venue we recognise.
     """
-    for source in holding.sources:
+    # A merged interlisting (CCO + CCJ) trades in two currencies. Look at the
+    # row's own ticker first, so CCO prices in CAD whichever listing a broker
+    # happened to return first. The sort is stable, so order is otherwise kept.
+    sources = sorted(holding.sources, key=lambda s: base_ticker(s.symbol) != holding.symbol)
+    for source in sources:
         currency = currency_for_exchange(source.exchange)
         if currency is not None:
             return currency
-    return holding.sources[0].market_value.currency
+    return sources[0].market_value.currency
 
 
 def _native_unit_price(holding: UnifiedHolding, provider: FxProvider | None = None) -> Money | None:
@@ -126,7 +178,16 @@ def _high_52w_pct(holding: UnifiedHolding, provider: FxProvider | None = None) -
     price = _native_unit_price(holding, provider)
     if price is None:
         return None
-    high = holding.high_52w
+    # Prefer a high quoted in the price's own currency: a merged interlisting
+    # carries one per listing, and comparing like with like needs no FX.
+    high = next(
+        (
+            s.high_52w
+            for s in holding.sources
+            if s.high_52w is not None and s.high_52w.currency is price.currency
+        ),
+        holding.high_52w,
+    )
     if high.currency is not price.currency:
         # A cache written before the 52-week high was tagged from the listing
         # venue can disagree with the price; convert rather than compare across
@@ -158,6 +219,11 @@ class HoldingRow:
     unit_price_display: Money | None = None
     avg_cost_native: Money | None = None  # average price paid, original currency
     avg_cost_display: Money | None = None  # the same, converted — sorted on this
+    # Every ticker merged into this row, its own first: ("CCO", "CCJ") for
+    # Cameco. Just the symbol for an ordinary holding.
+    listings: tuple[str, ...] = ()
+    # Share of this row's value in each account group, largest first.
+    account_mix: tuple[tuple[AccountBucket, Decimal], ...] = ()
 
     @property
     def allocation_pct(self) -> str:
@@ -175,6 +241,13 @@ class HoldingRow:
         if self.unit_price_native is None:
             return "—"
         return self.unit_price_native.format(places=2)
+
+    @property
+    def account_mix_text(self) -> str:
+        """The split as text, largest first: ``"TFSA 62% · RRSP 38%"``."""
+        if not self.account_mix:
+            return "—"
+        return " · ".join(f"{bucket.value} {share:.0%}" for bucket, share in self.account_mix)
 
     @property
     def avg_cost_text(self) -> str:
@@ -282,7 +355,16 @@ def _holding_row(
         unit_price_display=convert(price, display, provider) if price is not None else None,
         avg_cost_native=cost,
         avg_cost_display=convert(cost, display, provider) if cost is not None else None,
+        listings=_listings(holding),
+        account_mix=_account_mix(holding),
     )
+
+
+def _listings(holding: UnifiedHolding) -> tuple[str, ...]:
+    """The distinct tickers merged into ``holding``, its own symbol first."""
+    others = dict.fromkeys(base_ticker(s.symbol) for s in holding.sources)
+    others.pop(holding.symbol, None)
+    return (holding.symbol, *others)
 
 
 def build_dashboard_view_model(
@@ -361,12 +443,13 @@ def build_dashboard_view_model(
     )
 
 
-def view_model_for(
+def view_model_for(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     people: tuple[Person, ...],
     display_currency: Currency,
     provider: FxProvider,
     account_ids: frozenset[str] | None = None,
     as_of: str | None = None,
+    asset_map: AssetMap | None = None,
 ) -> DashboardViewModel:
     """Filter people, build a snapshot, and adapt it — the full pipeline.
 
@@ -374,7 +457,7 @@ def view_model_for(
     metrics and table are filtered by ``account_ids``.
     """
     selected = filter_people(people, account_ids)
-    snapshot = build_snapshot(selected, display_currency, provider, as_of=as_of)
+    snapshot = build_snapshot(selected, display_currency, provider, asset_map, as_of=as_of)
     view_model = build_dashboard_view_model(snapshot, provider)
     if account_ids is not None:
         view_model = DashboardViewModel(
