@@ -23,6 +23,7 @@ from moneytor.ui.viewmodels import (
     AccountBucket,
     HoldingRow,
     _account_mix,
+    _avg_cost_is_partial,
     _high_52w_pct,
     _native_avg_cost,
     _native_unit_price,
@@ -49,7 +50,7 @@ def test_view_model_kpis_and_total() -> None:
     assert vm.kpis[0].value.startswith("$")  # number only
     assert "CAD" not in vm.kpis[0].value  # currency code lives in the subtitle
     assert vm.kpis[0].subtitle == "in CAD"
-    assert vm.holding_count == 4
+    assert vm.holding_count == 6  # 4 securities + CAD and USD cash lines
     assert vm.account_count == 3
 
 
@@ -92,7 +93,7 @@ def test_filtering_by_account_reduces_rows_but_keeps_full_sidebar() -> None:
     people = _people()
     only_tfsa = view_model_for(people, CAD, PROVIDER, account_ids=frozenset({"qt-tfsa-ramin"}))
     assert only_tfsa.account_count == 1
-    assert {r.symbol for r in only_tfsa.rows} == {"SHOP", "VFV"}
+    assert {r.symbol for r in only_tfsa.rows} == {"SHOP", "VFV", "CASH:CAD"}
     # Sidebar still shows all accounts even when filtered.
     assert len(only_tfsa.sidebar.people[0].accounts) == 3
 
@@ -100,7 +101,7 @@ def test_filtering_by_account_reduces_rows_but_keeps_full_sidebar() -> None:
 def test_empty_selection_via_none_shows_all() -> None:
     people = _people()
     vm = view_model_for(people, CAD, PROVIDER, account_ids=None)
-    assert vm.holding_count == 4
+    assert vm.holding_count == 6  # 4 securities + CAD and USD cash lines
 
 
 def test_high_52w_pct_computed_in_native_currency() -> None:
@@ -607,3 +608,75 @@ def test_account_mix_follows_the_sidebar_selection() -> None:
     }
     only_tfsa = view_model_for(people, Currency.CAD, _FX, account_ids=frozenset({"tfsa"}))
     assert only_tfsa.rows[0].account_mix == ((AccountBucket.TFSA, Decimal("1")),)
+
+
+# --------------------------------------------------------------------------- #
+# Lots with no cost on record (book value 0)
+# --------------------------------------------------------------------------- #
+
+
+def test_no_cost_on_record_shows_a_dash_not_zero() -> None:
+    # Shares transferred in from another broker often arrive with no book value.
+    holding = _cost_source("NASDAQ", "10", "0", Currency.USD)
+    unified = merge_holdings((holding,), Currency.CAD, _FX)[0]
+    assert _native_avg_cost(unified, _FX) is None
+    assert not _avg_cost_is_partial(unified)  # nothing is known, so nothing is partial
+
+
+def test_lots_without_a_cost_do_not_drag_the_average_down() -> None:
+    sources = (
+        _cost_source("NASDAQ", "10", "500", Currency.USD),  # $50/share, on record
+        _cost_source("NASDAQ", "30", "0", Currency.USD),  # transferred in, no cost
+    )
+    unified = merge_holdings(sources, Currency.CAD, _FX)[0]
+    # $50, not 500 / 40 = $12.50 as if 30 shares had been free.
+    assert _native_avg_cost(unified, _FX) == Money(Decimal("50"), Currency.USD)
+    assert _avg_cost_is_partial(unified)
+
+
+def test_partial_average_is_marked_in_the_text() -> None:
+    row = HoldingRow(
+        symbol="X",
+        asset_class="equity",
+        quantity=Decimal("40"),
+        value=Money.of("1", CAD),
+        allocation=Decimal("0"),
+        avg_cost_native=Money(Decimal("50"), Currency.USD),
+        avg_cost_partial=True,
+    )
+    assert row.avg_cost_text == "$50.00 USD *"
+
+
+def test_fully_costed_position_is_not_partial() -> None:
+    sources = (
+        _cost_source("NASDAQ", "10", "500", Currency.USD),
+        _cost_source("NASDAQ", "30", "1200", Currency.USD),
+    )
+    unified = merge_holdings(sources, Currency.CAD, _FX)[0]
+    assert not _avg_cost_is_partial(unified)
+
+
+@pytest.mark.parametrize(
+    "account_type", [AccountType.RESP, AccountType.LIRA, AccountType.RRIF, AccountType.OTHER]
+)
+def test_newer_account_types_fall_in_the_other_slice(account_type: AccountType) -> None:
+    assert account_bucket(account_type) is AccountBucket.OTHER
+
+
+def test_52_week_gap_for_a_penny_stock_is_not_rounded_to_the_cent() -> None:
+    # A CAD-priced row whose only high is in USD (an old cache, or a merged
+    # interlisting): converting the high to whole cents first skewed the gap.
+    holding = Holding(
+        symbol="PENNY",
+        exchange="TSX-V",
+        asset_class=AssetClass.EQUITY,
+        quantity=Decimal("1000"),
+        book_value=Money.of("500", Currency.CAD),
+        market_value=Money.of("500", Currency.CAD),  # 0.50 CAD/share
+        high_52w=Money.of("0.4999", Currency.USD),  # x1.376 = 0.68786 CAD
+    )
+    unified = merge_holdings((holding,), Currency.CAD, _FX)[0]
+    exact = (Decimal("0.4999") * Decimal("1.376") - Decimal("0.5")) / (
+        Decimal("0.4999") * Decimal("1.376")
+    )
+    assert _high_52w_pct(unified, _FX) == exact  # 27.31%, not 27.54% via 0.69

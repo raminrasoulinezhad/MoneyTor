@@ -32,6 +32,9 @@ from .provider import StaticFxProvider
 _LOG = logging.getLogger(__name__)
 _ENDPOINT = "https://open.er-api.com/v6/latest/USD"
 _ONE = Decimal(1)
+# USD/CAD has stayed within roughly 0.95-1.62 for fifty years; this is wide
+# enough never to reject a real rate and narrow enough to catch a broken one.
+_PLAUSIBLE_USD_CAD = (Decimal("0.8"), Decimal("2.0"))
 
 RateTable = Mapping[tuple[Currency, Currency], Decimal]
 
@@ -50,7 +53,9 @@ def fetch_usd_cad(client: httpx.Client | None = None) -> Decimal:
     finally:
         if owns_client:
             client.close()
-    if value <= 0:
+    if not _PLAUSIBLE_USD_CAD[0] <= value <= _PLAUSIBLE_USD_CAD[1]:
+        # A malformed or misread response would otherwise revalue every USD
+        # holding; keeping the previous rate is the safer failure.
         raise FxError(f"Implausible USD->CAD rate: {value}.")
     return value
 
@@ -74,10 +79,26 @@ class SnapshotFxProvider:
         self, fallback_usd_cad: Decimal, fetcher: Callable[[], Decimal] = fetch_usd_cad
     ) -> None:
         self._fetcher = fetcher
+        self._usd_cad = fallback_usd_cad
         self._snapshot = StaticFxProvider(usd_cad_table(fallback_usd_cad))
+        self._is_fallback = True
 
     def get_rate(self, base: Currency, quote: Currency) -> Decimal:
         return self._snapshot.get_rate(base, quote)
+
+    @property
+    def usd_cad(self) -> Decimal:
+        """The USD->CAD rate conversions currently use."""
+        return self._usd_cad
+
+    @property
+    def is_fallback(self) -> bool:
+        """True until a real rate has been fetched or restored from the cache."""
+        return self._is_fallback
+
+    def use_rate(self, usd_cad: Decimal) -> None:
+        """Adopt a known rate — the one cached data was valued at."""
+        self._swap(usd_cad)
 
     def refresh(self) -> None:
         """Re-fetch the rate; keep the previous snapshot if the fetch fails."""
@@ -86,6 +107,11 @@ class SnapshotFxProvider:
         except FxError as exc:
             _LOG.warning("Keeping previous FX rate: %s", exc)
             return
-        # Atomic swap: a single attribute rebind, safe against concurrent reads.
-        self._snapshot = StaticFxProvider(usd_cad_table(rate))
+        self._swap(rate)
         _LOG.info("Refreshed FX: USD->CAD = %s", rate)
+
+    def _swap(self, usd_cad: Decimal) -> None:
+        # Atomic swap: a single attribute rebind, safe against concurrent reads.
+        self._snapshot = StaticFxProvider(usd_cad_table(usd_cad))
+        self._usd_cad = usd_cad
+        self._is_fallback = False

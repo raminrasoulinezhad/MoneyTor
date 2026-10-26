@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import queue
 from collections.abc import Callable
+from contextlib import suppress
 
 from PySide6.QtCore import QObject, Qt, Signal, Slot
 from PySide6.QtWidgets import QWidget
@@ -37,28 +38,52 @@ class GuiOtpProvider(QObject):
         super().__init__()
         self.parent_widget = parent_widget
         self._account = ""
+        self._cancelled = False
         self._result: queue.Queue[str] = queue.Queue(maxsize=1)
         # Queued: emitted from the worker thread, the slot runs on the GUI thread.
         self._requested.connect(self._show, Qt.ConnectionType.QueuedConnection)
 
     def __call__(self) -> str:
-        """Invoked on the worker thread; blocks until the GUI returns a code."""
+        """Invoked on the worker thread; blocks until the GUI returns a code.
+
+        Returns ``""`` (no code — the login fails cleanly) once :meth:`cancel`
+        has been called, so a fetch waiting here can always finish.
+        """
+        if self._cancelled:
+            return ""
         self._requested.emit()
         return self._result.get()
 
-    def for_account(self, person_id: str, email: str) -> Callable[[], str]:
+    def cancel(self) -> None:
+        """Release any login waiting for a code, now and from here on.
+
+        Called when the app closes: otherwise a fetch blocked on a prompt that
+        will never be shown keeps its thread — and the process — alive forever.
+        """
+        self._cancelled = True
+        with suppress(queue.Full):
+            self._result.put_nowait("")
+
+    def for_account(self, person: str, email: str) -> Callable[[], str]:
         """Return a zero-arg ``otp_provider`` whose prompt names this account.
 
-        Logins run sequentially on the worker thread, so stashing the label on
-        the instance before each prompt is safe.
+        ``person`` is the name shown to the user. Logins run sequentially on
+        the worker thread, so stashing the label on the instance before each
+        prompt is safe.
         """
 
         def provider() -> str:
-            self._account = f"{person_id} ({email})" if email else person_id
+            self._account = f"{person} ({email})" if email else person
             return self()
 
         return provider
 
     @Slot()
     def _show(self) -> None:
-        self._result.put(prompt_otp(self.parent_widget, account=self._account))
+        if self._cancelled:
+            return  # cancel() already answered the waiting login
+        code = prompt_otp(self.parent_widget, account=self._account)
+        # put_nowait: a blocking put on a queue cancel() already filled would
+        # freeze the GUI thread.
+        with suppress(queue.Full):
+            self._result.put_nowait(code)

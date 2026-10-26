@@ -52,12 +52,17 @@ def _donut_html(
     tokens: ThemeTokens,
     height: int = DEFAULT_CHART_HEIGHT,
 ) -> str:
-    """Render a donut chart from parallel label/value sequences as full HTML."""
+    """Render a donut chart from parallel label/value sequences as full HTML.
+
+    Only positive slices are drawn: a pie cannot show a negative share, and a
+    margin-debt cash line would otherwise distort every other slice.
+    """
+    slices = [(label, value) for label, value in zip(labels, values, strict=True) if value > 0]
     figure = go.Figure(
         data=[
             go.Pie(
-                labels=list(labels),
-                values=[float(v) for v in values],
+                labels=[label for label, _ in slices],
+                values=[float(value) for _, value in slices],
                 hole=0.5,
                 marker={"colors": _PALETTE, "line": {"color": tokens.surface, "width": 2}},
                 # Symbol-only labels drawn on the slices keep the pie large;
@@ -96,7 +101,12 @@ def allocation_donut_html(
 def _grouped(
     totals: dict[str, Decimal], threshold: Decimal, other_label: str
 ) -> tuple[list[str], list[Decimal]]:
-    """Order slices by value desc, rolling those under ``threshold`` into one."""
+    """Order slices by value desc, rolling those under ``threshold`` into one.
+
+    Non-positive totals (margin debt) are left out first: summed into the
+    catch-all they would cancel real holdings out of it.
+    """
+    totals = {k: v for k, v in totals.items() if v > 0}
     grand = sum(totals.values(), Decimal("0"))
     cutoff = grand * threshold
     kept = sorted(

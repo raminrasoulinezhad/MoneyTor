@@ -40,6 +40,13 @@ class AccountType(StrEnum):
     MANAGED = "managed"
     GIC = "gic"
     CASH = "cash"
+    RESP = "resp"
+    LIRA = "lira"  # and other locked-in retirement accounts (LRSP)
+    RRIF = "rrif"  # and other retirement income funds (RIF, LIF, PRIF)
+    # A type the broker reported that we don't recognise. Better shown as
+    # "Other" than guessed: defaulting to CASH filed registered accounts as
+    # non-registered in the Accounts column.
+    OTHER = "other"
 
 
 class AssetClass(StrEnum):

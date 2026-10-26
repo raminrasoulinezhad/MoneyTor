@@ -166,6 +166,19 @@ def _build_person(person_id: str, fields: Mapping[str, str]) -> PersonCredential
     )
 
 
+def read_app_password(
+    env_file: str | Path | None = ".env",
+    environ: Mapping[str, str] | None = None,
+) -> Secret | None:
+    """Just ``MONEYTOR_APP_PASSWORD``, read without validating anything else.
+
+    For when :func:`load_settings` fails: a typo in an unrelated key must not
+    also switch off the password gate and open the portfolio unlocked.
+    """
+    raw = _resolve_env(env_file, environ).get("MONEYTOR_APP_PASSWORD")
+    return Secret(raw) if raw else None
+
+
 def load_settings(
     env_file: str | Path | None = ".env",
     environ: Mapping[str, str] | None = None,

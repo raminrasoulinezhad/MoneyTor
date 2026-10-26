@@ -11,6 +11,8 @@ from __future__ import annotations
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
+
 from moneytor.connectors import load_accounts
 from moneytor.domain import Currency, Money, Person
 from moneytor.persistence import SnapshotCache
@@ -127,3 +129,29 @@ def test_save_is_owner_only(tmp_path: Path) -> None:
     path = tmp_path / "snap.json"
     SnapshotCache(path).save(_people(), Currency.CAD)
     assert (path.stat().st_mode & 0o777) == 0o600  # financial data, owner-only
+
+
+def test_fetch_time_and_rate_round_trip(tmp_path: Path) -> None:
+    cache = SnapshotCache(tmp_path / "s.json")
+    cache.save(_people(), Currency.CAD, as_of="2026-10-01 09:30", usd_cad=Decimal("1.4123"))
+    loaded = cache.load()
+    assert loaded is not None
+    assert loaded.as_of == "2026-10-01 09:30"
+    assert loaded.usd_cad == Decimal("1.4123")
+
+
+def test_cache_written_without_a_rate_loads_with_none(tmp_path: Path) -> None:
+    cache = SnapshotCache(tmp_path / "s.json")
+    cache.save(_people(), Currency.CAD)
+    loaded = cache.load()
+    assert loaded is not None
+    assert loaded.usd_cad is None
+
+
+@pytest.mark.parametrize("bad", ['"0"', '"-1.4"', '"NaN"', '"abc"'])
+def test_a_corrupt_cached_rate_discards_the_cache(tmp_path: Path, bad: str) -> None:
+    # Better to refetch than to value the portfolio at a nonsense rate.
+    path = tmp_path / "s.json"
+    SnapshotCache(path).save(_people(), Currency.CAD, usd_cad=Decimal("1.4"))
+    path.write_text(path.read_text().replace('"usd_cad": "1.4"', f'"usd_cad": {bad}'))
+    assert SnapshotCache(path).load() is None

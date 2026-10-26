@@ -259,3 +259,83 @@ def test_zero_quantity_holding_has_no_unit_price() -> None:
     row = build_dashboard_view_model(snapshot, FX).rows[0]
     assert row.unit_price_native is None
     assert row.unit_price_text == "—"
+
+
+# --------------------------------------------------------------------------- #
+# The table adds up to the headline total
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_the_table_adds_up_to_the_headline_total(seed: int) -> None:
+    # Cash used to count in the total but appear nowhere in the table, so the
+    # rows (and every Alloc %) were measured against a different total.
+    people = _portfolio(seed)
+    vm = build_dashboard_view_model(build_snapshot(people, Currency.CAD, FX), FX)
+    rows = sum((r.value for r in vm.rows), Money.zero(Currency.CAD))
+    # Each conversion and each account subtotal rounds to the cent.
+    positions = sum(len(a.holdings) + 1 for p in people for a in p.accounts)
+    assert abs(rows.amount - vm.total_value.amount) <= Decimal("0.01") * positions
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_each_rows_account_split_adds_up_to_its_value(seed: int) -> None:
+    snapshot = build_snapshot(_portfolio(seed), Currency.CAD, FX)
+    for unified in snapshot.unified_holdings:
+        split = sum(unified.value_by_account_type.values(), Money.zero(Currency.CAD))
+        assert split.quantize() == unified.total_market_value, unified.symbol
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_every_rows_account_shares_sum_to_one(seed: int) -> None:
+    vm = build_dashboard_view_model(build_snapshot(_portfolio(seed), Currency.CAD, FX), FX)
+    for row in vm.rows:
+        if row.account_mix:
+            assert sum(share for _, share in row.account_mix) == pytest.approx(Decimal("1"))
+            assert all(share > 0 for _, share in row.account_mix)
+
+
+# --------------------------------------------------------------------------- #
+# Margin debt (a negative cash balance)
+# --------------------------------------------------------------------------- #
+
+
+def _margin_account() -> tuple[Person, ...]:
+    stock = Holding(
+        symbol="AAA",
+        exchange="TSX",
+        asset_class=AssetClass.EQUITY,
+        quantity=Decimal("100"),
+        book_value=Money.of("9000", Currency.CAD),
+        market_value=Money.of("10000", Currency.CAD),
+    )
+    account = Account(
+        id="m1",
+        person_id="p",
+        institution=Institution.QUESTRADE,
+        account_type=AccountType.MARGIN,
+        cash=Money.of("-2000", Currency.CAD),  # borrowed on margin
+        holdings=(stock,),
+    )
+    return (Person(id="p", name="P", accounts=(account,)),)
+
+
+def test_margin_debt_is_a_visible_negative_line_not_hidden() -> None:
+    vm = build_dashboard_view_model(build_snapshot(_margin_account(), Currency.CAD, FX), FX)
+    rows = {r.symbol: r for r in vm.rows}
+    assert rows["CASH:CAD"].value == Money.of("-2000", Currency.CAD)
+    assert vm.total_value == Money.of("8000", Currency.CAD)
+    assert sum((r.value for r in vm.rows), Money.zero(Currency.CAD)) == vm.total_value
+
+
+def test_margin_debt_never_reaches_a_pie() -> None:
+    from moneytor.ui.charts import _grouped
+
+    vm = build_dashboard_view_model(build_snapshot(_margin_account(), Currency.CAD, FX), FX)
+    debt = next(r for r in vm.rows if r.symbol == "CASH:CAD")
+    assert debt.account_mix == ()  # no pie for a negative balance
+    labels, values = _grouped(
+        {"AAA": Decimal("10000"), "CASH:CAD": Decimal("-2000")}, Decimal("0.01"), "Others"
+    )
+    assert labels == ["AAA"]  # the debt neither shows nor eats into "Others"
+    assert values == [Decimal("10000")]

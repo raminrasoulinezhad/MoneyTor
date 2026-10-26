@@ -16,6 +16,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from ._private_file import write_private
+
 DEFAULT_TOKEN_PATH = Path(".cache") / "tokens.json"
 
 
@@ -48,6 +50,4 @@ class TokenStore:
         """
         data = self._load()
         data.setdefault(institution, {})[person_id] = token
-        self._path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self._path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        self._path.chmod(0o600)
+        write_private(self._path, json.dumps(data, indent=2))

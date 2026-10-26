@@ -13,6 +13,7 @@ from .listings import EQUIVALENT_LISTINGS
 from .merge import merge_holdings
 from .normalize import GICS_SECTORS, AssetMap, SectorMap, apply_sector_map, normalize_sector
 from .snapshot import (
+    account_positions,
     account_value,
     allocation_by_symbol,
     annual_dividend_income,
@@ -31,6 +32,7 @@ __all__ = [
     "GICS_SECTORS",
     "AssetMap",
     "SectorMap",
+    "account_positions",
     "account_value",
     "allocation_by_symbol",
     "annual_dividend_income",

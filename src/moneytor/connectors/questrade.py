@@ -38,6 +38,7 @@ from moneytor.domain.models import Account, Holding
 from moneytor.domain.money import Money
 from moneytor.persistence.token_store import TokenStore
 
+from ._parse import account_type_for
 from ._parse import to_currency as _currency
 from ._parse import to_decimal as _decimal
 from .errors import AuthError, ConnectorError, FetchError, RateLimitError
@@ -51,6 +52,18 @@ _ACCOUNT_TYPES: dict[str, AccountType] = {
     "TFSA": AccountType.TFSA,
     "RRSP": AccountType.RRSP,
     "SRRSP": AccountType.SPOUSAL_RRSP,
+    "FHSA": AccountType.FHSA,
+    "RESP": AccountType.RESP,
+    "FRESP": AccountType.RESP,
+    "LIRA": AccountType.LIRA,
+    "LRSP": AccountType.LIRA,
+    "LRRSP": AccountType.LIRA,
+    "RRIF": AccountType.RRIF,
+    "RIF": AccountType.RRIF,
+    "SRIF": AccountType.RRIF,
+    "LRIF": AccountType.RRIF,
+    "PRIF": AccountType.RRIF,
+    "LIF": AccountType.RRIF,
 }
 _SECURITY_TYPES: dict[str, AssetClass] = {
     "Stock": AssetClass.EQUITY,
@@ -187,7 +200,7 @@ class QuestradeConnector:
             id=number,
             person_id=self._person_id,
             institution=Institution.QUESTRADE,
-            account_type=_ACCOUNT_TYPES.get(str(node.get("type")), AccountType.CASH),
+            account_type=account_type_for(_ACCOUNT_TYPES, node.get("type"), "Questrade"),
             cash=cash,
             holdings=holdings + extra_cash,
         )

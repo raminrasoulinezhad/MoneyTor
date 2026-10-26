@@ -292,7 +292,8 @@ def test_build_snapshot_end_to_end() -> None:
     assert snapshot.display_currency is CAD
     assert snapshot.as_of == "2026-06-06"
     symbols = {u.symbol for u in snapshot.unified_holdings}
-    assert symbols == {"SHOP", "VFV", "AAPL", "GIC-OAKEN-2027"}
+    # Account cash is a line too (TFSA: CAD, margin: USD); the GIC account holds none.
+    assert symbols == {"SHOP", "VFV", "AAPL", "GIC-OAKEN-2027", "CASH:CAD", "CASH:USD"}
 
 
 def test_allocation_sums_to_one() -> None:

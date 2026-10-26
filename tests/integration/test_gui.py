@@ -89,7 +89,9 @@ def test_window_renders_kpis_and_table(qtbot) -> None:
     window = _window(qtbot)
     assert len(window.kpi_panel.kpi_cards) == 6
     assert "$" in window.kpi_panel.kpi_cards[0].value_text  # currency code is in the subtitle
-    assert window.dashboard.table.rowCount() == 4  # SHOP, VFV, AAPL, GIC
+    # SHOP, VFV, AAPL, GIC, plus the TFSA's CAD cash and the margin account's USD
+    # cash — cash is in the headline total, so it has a row too.
+    assert window.dashboard.table.rowCount() == 6
 
 
 def test_lock_overlay_covers_window_and_unlocks(qtbot) -> None:
@@ -149,19 +151,19 @@ def test_theme_toggle_swaps_stylesheet(qtbot) -> None:
 
 def test_sidebar_filter_updates_table(qtbot) -> None:
     window = _window(qtbot)
-    assert window.dashboard.table.rowCount() == 4
+    assert window.dashboard.table.rowCount() == 6
     # Simulate selecting only the TFSA account.
     window._on_selection_changed(frozenset({"qt-tfsa-ramin"}))
-    assert window.dashboard.table.rowCount() == 2  # SHOP + VFV only
+    assert window.dashboard.table.rowCount() == 3  # SHOP + VFV + the TFSA's cash
 
 
 def test_search_filters_table_by_symbol(qtbot) -> None:
     window = _window(qtbot)
-    assert window.dashboard.table.rowCount() == 4
+    assert window.dashboard.table.rowCount() == 6
     window.dashboard.search.setText("shop")
     assert window.dashboard.table.rowCount() == 1
     window.dashboard.search.setText("")
-    assert window.dashboard.table.rowCount() == 4
+    assert window.dashboard.table.rowCount() == 6
 
 
 def test_search_filters_table_by_name(qtbot) -> None:
@@ -728,8 +730,20 @@ class _FakeConnector:
         return self._accounts
 
 
+def _accounts_of(person_id: str):
+    """The fixture accounts, numbered for ``person_id`` so no two people share one.
+
+    Handing two people identical account numbers would model a joint account,
+    which live_people deliberately counts only once.
+    """
+    from dataclasses import replace as dc_replace
+
+    return tuple(
+        dc_replace(a, id=f"{person_id}-{a.id}", person_id=person_id) for a in load_accounts(FIXTURE)
+    )
+
+
 def test_live_people_reports_progress_per_source(monkeypatch) -> None:
-    accounts = load_accounts(FIXTURE)
     settings = Settings(
         people=(
             PersonCredentials(
@@ -743,7 +757,7 @@ def test_live_people_reports_progress_per_source(monkeypatch) -> None:
         institution = (
             Institution.WEALTHSIMPLE if creds.person_id == "ramin" else Institution.QUESTRADE
         )
-        return [_FakeConnector(institution, accounts)]
+        return [_FakeConnector(institution, _accounts_of(creds.person_id))]
 
     monkeypatch.setattr(app_module, "_connectors_for", fake_connectors_for)
 
@@ -778,11 +792,12 @@ def test_reload_updates_data_and_timestamp(qtbot) -> None:
         clock=lambda: "2026-06-08 09:00",
     )
     qtbot.addWidget(window)
-    assert window.dashboard.table.rowCount() == 4
+    assert window.dashboard.table.rowCount() == 6
 
     window.reload_data()
     qtbot.waitUntil(lambda: window.last_updated != "", timeout=2000)
-    assert window.last_updated == "Updated 2026-06-08 09:00"
+    # The rate in use is shown too, so a conversion is never invisible.
+    assert window.last_updated == "Updated 2026-06-08 09:00 · USD/CAD 1.3500"
     assert window.banner.isHidden()
     # The loading bar is hidden again once the fetch completes.
     assert window.progress.isHidden()
@@ -1087,7 +1102,6 @@ def test_sidebar_is_narrower_than_before(qtbot) -> None:
 
 
 def test_live_people_use_the_configured_display_names(monkeypatch) -> None:
-    accounts = load_accounts(FIXTURE)
     settings = Settings(
         people=(
             PersonCredentials(
@@ -1100,7 +1114,7 @@ def test_live_people_use_the_configured_display_names(monkeypatch) -> None:
         app_module,
         "_connectors_for",
         lambda creds, token_store, otp_provider=None: [
-            _FakeConnector(Institution.QUESTRADE, accounts)
+            _FakeConnector(Institution.QUESTRADE, _accounts_of(creds.person_id))
         ],
     )
     labels: list[str] = []
@@ -1353,3 +1367,365 @@ def test_every_theme_colours_every_account_bucket() -> None:
 
     for tokens in (DARK, LIGHT):
         assert len(tokens.account_colors) == len(AccountBucket)
+
+
+# --------------------------------------------------------------------------- #
+# Closing while a refresh is running (used to abort the process)
+# --------------------------------------------------------------------------- #
+
+
+def test_closing_mid_refresh_waits_for_the_fetch_instead_of_crashing(qtbot) -> None:
+    import threading
+
+    release = threading.Event()
+
+    def slow_loader():
+        release.wait(5)  # a refresh still talking to the broker
+        return ()
+
+    window = MainWindow(
+        people=(), provider=PROVIDER, loader=slow_loader, autostart=_FakeAutostart()
+    )
+    qtbot.addWidget(window)
+    window.show()
+    window.reload_data()
+    worker = window._worker
+    assert worker is not None and worker.isRunning()
+
+    window.close()
+    # Qt aborts the process if a running QThread is destroyed, so the close is
+    # deferred: the window disappears at once, but the thread is left to finish.
+    assert not window.isVisible()
+    assert worker.isRunning()
+
+    release.set()
+    qtbot.waitUntil(lambda: not worker.isRunning(), timeout=5000)
+    qtbot.waitUntil(lambda: window._close_pending and not window.isVisible(), timeout=5000)
+
+
+def test_closing_emits_closing_so_pending_work_can_be_released(qtbot) -> None:
+    window = MainWindow(people=(), provider=PROVIDER, autostart=_FakeAutostart())
+    qtbot.addWidget(window)
+    window.show()
+    with qtbot.waitSignal(window.closing, timeout=1000):
+        window.close()
+
+
+def test_cancel_releases_a_login_waiting_for_a_2fa_code(qtbot, monkeypatch) -> None:
+    import threading
+
+    from moneytor.ui import otp
+    from moneytor.ui.otp import GuiOtpProvider
+
+    # If the queued prompt ever runs, answer at once rather than open a dialog.
+    monkeypatch.setattr(otp, "prompt_otp", lambda *a, **k: "unexpected")
+
+    provider = GuiOtpProvider()
+    # The prompt is never answered: no event loop runs here to show it.
+    answers: list[str] = []
+    login = threading.Thread(target=lambda: answers.append(provider()))
+    login.start()
+    provider.cancel()  # the app is closing
+    login.join(timeout=5)
+
+    assert not login.is_alive()  # used to block forever
+    assert answers == [""]
+    assert provider() == ""  # and later logins don't wait either
+
+
+def test_a_late_prompt_after_cancel_does_not_freeze_the_gui(qtbot, monkeypatch) -> None:
+    from moneytor.ui import otp
+
+    provider = otp.GuiOtpProvider()
+    shown: list[str] = []
+    monkeypatch.setattr(otp, "prompt_otp", lambda *a, **k: shown.append("dialog") or "123456")
+    provider.cancel()  # the queue now holds the empty answer
+    provider._show()  # a prompt queued before the cancel finally runs
+
+    assert shown == []  # no dialog for an abandoned login, and no blocking put
+
+
+def test_2fa_prompt_names_the_person_not_their_config_key() -> None:
+    from moneytor.ui.otp import GuiOtpProvider
+
+    creds = PersonCredentials(
+        person_id="person1",
+        wealthsimple_email="a@example.com",
+        wealthsimple_password=Secret("pw"),
+        name="Alex",
+    )
+    provider = GuiOtpProvider()
+    provider.cancel()  # answer at once instead of waiting on a dialog
+    (connector,) = app_module._connectors_for(creds, TokenStore(), provider)
+    assert connector._otp_provider() == ""
+    assert provider._account == "Alex (a@example.com)"
+
+
+# --------------------------------------------------------------------------- #
+# Fetching several people: joint accounts and whose login failed
+# --------------------------------------------------------------------------- #
+
+
+def _two_people() -> Settings:
+    return Settings(
+        people=(
+            PersonCredentials(
+                person_id="person1", questrade_refresh_token=Secret("a"), name="Alex"
+            ),
+            PersonCredentials(person_id="person2", questrade_refresh_token=Secret("b"), name="Sam"),
+        )
+    )
+
+
+def _account(account_id: str, person_id: str):
+    from moneytor.domain.models import Account
+
+    return Account(
+        id=account_id,
+        person_id=person_id,
+        institution=Institution.QUESTRADE,
+        account_type=AccountType.MARGIN,
+        cash=Money.of("1000", CAD),
+        holdings=(),
+    )
+
+
+def test_a_joint_account_is_counted_once(monkeypatch) -> None:
+    # Both holders' logins return the joint account under the same number.
+    joint = "JOINT-1"
+    by_person = {
+        "person1": [_account("A-1", "person1"), _account(joint, "person1")],
+        "person2": [_account("S-1", "person2"), _account(joint, "person2")],
+    }
+    monkeypatch.setattr(
+        app_module,
+        "_connectors_for",
+        lambda creds, store, otp=None: [
+            _FakeConnector(Institution.QUESTRADE, by_person[creds.person_id])
+        ],
+    )
+    people = app_module.live_people(_two_people(), TokenStore())
+
+    ids = [a.id for p in people for a in p.accounts]
+    assert sorted(ids) == ["A-1", "JOINT-1", "S-1"]
+    total = sum((a.cash for p in people for a in p.accounts), Money.zero(CAD))
+    assert total == Money.of("3000", CAD)  # not 4000
+
+
+def test_same_number_at_different_brokers_is_not_a_duplicate(monkeypatch) -> None:
+    from dataclasses import replace as dc_replace
+
+    qt = _account("12345", "person1")
+    ws = dc_replace(qt, institution=Institution.WEALTHSIMPLE)
+    monkeypatch.setattr(
+        app_module,
+        "_connectors_for",
+        lambda creds, store, otp=None: (
+            [
+                _FakeConnector(Institution.QUESTRADE, [qt]),
+                _FakeConnector(Institution.WEALTHSIMPLE, [ws]),
+            ]
+            if creds.person_id == "person1"
+            else []
+        ),
+    )
+    people = app_module.live_people(_two_people(), TokenStore())
+    assert len([a for p in people for a in p.accounts]) == 2
+
+
+@pytest.mark.parametrize("error_type", ["AuthError", "RateLimitError", "FetchError"])
+def test_a_failed_login_names_whose_it_was(monkeypatch, error_type: str) -> None:
+    from moneytor.connectors import errors
+
+    error = getattr(errors, error_type)
+
+    class _Failing(_FakeConnector):
+        def authenticate(self) -> None:
+            raise error("Questrade rejected the refresh token (HTTP 400).")
+
+    monkeypatch.setattr(
+        app_module,
+        "_connectors_for",
+        lambda creds, store, otp=None: (
+            [_Failing(Institution.QUESTRADE, [])]
+            if creds.person_id == "person2"
+            else [_FakeConnector(Institution.QUESTRADE, [_account("A-1", "person1")])]
+        ),
+    )
+    with pytest.raises(error) as caught:  # same type, so the UI's handling is unchanged
+        app_module.live_people(_two_people(), TokenStore())
+    assert str(caught.value) == "Sam's Questrade: Questrade rejected the refresh token (HTTP 400)."
+
+
+def test_partial_avg_paid_explains_itself_on_hover(qtbot) -> None:
+    from moneytor.ui.viewmodels import HoldingRow
+
+    row = HoldingRow(
+        symbol="X",
+        asset_class="equity",
+        quantity=Decimal("40"),
+        value=Money.of("1", CAD),
+        allocation=Decimal("0"),
+        avg_cost_native=Money.of("50", USD),
+        avg_cost_partial=True,
+    )
+    table = _make_table(qtbot, [row])
+    assert table.item(0, 9).text() == "$50.00 USD *"
+    assert "no cost on record" in table.item(0, 9).toolTip()
+
+
+# --------------------------------------------------------------------------- #
+# Sidebar ticks (they decide what every number on screen includes)
+# --------------------------------------------------------------------------- #
+
+
+def _sidebar(qtbot):
+    from moneytor.ui.viewmodels import SidebarAccount, SidebarModel, SidebarPerson
+    from moneytor.ui.widgets.sidebar import Sidebar
+
+    sidebar = Sidebar()
+    qtbot.addWidget(sidebar)
+    sidebar.set_model(
+        SidebarModel(
+            people=(
+                SidebarPerson(
+                    id="alex",
+                    name="Alex",
+                    accounts=(
+                        SidebarAccount(id="a-tfsa", label="TFSA · questrade"),
+                        SidebarAccount(id="a-rrsp", label="RRSP · questrade"),
+                    ),
+                ),
+                SidebarPerson(
+                    id="sam", name="Sam", accounts=(SidebarAccount(id="s-fhsa", label="FHSA"),)
+                ),
+            )
+        )
+    )
+    tree = sidebar._tree
+    return sidebar, tree.topLevelItem(0), tree.topLevelItem(1)
+
+
+def test_everything_starts_ticked(qtbot) -> None:
+    sidebar, _alex, _sam = _sidebar(qtbot)
+    assert sidebar.selected_account_ids() == {"a-tfsa", "a-rrsp", "s-fhsa"}
+
+
+def test_unticking_a_person_unticks_their_accounts(qtbot) -> None:
+    sidebar, alex, _sam = _sidebar(qtbot)
+    with qtbot.waitSignal(sidebar.selectionChanged, timeout=1000) as signal:
+        alex.setCheckState(0, Qt.CheckState.Unchecked)
+    assert signal.args == [frozenset({"s-fhsa"})]
+    assert [alex.child(i).checkState(0) for i in range(2)] == [Qt.CheckState.Unchecked] * 2
+
+
+def test_unticking_some_accounts_shows_the_person_partly_ticked(qtbot) -> None:
+    sidebar, alex, _sam = _sidebar(qtbot)
+    with qtbot.waitSignal(sidebar.selectionChanged, timeout=1000) as signal:
+        alex.child(0).setCheckState(0, Qt.CheckState.Unchecked)
+    assert signal.args == [frozenset({"a-rrsp", "s-fhsa"})]
+    # It used to stay fully ticked, misreporting what was included.
+    assert alex.checkState(0) == Qt.CheckState.PartiallyChecked
+
+    alex.child(1).setCheckState(0, Qt.CheckState.Unchecked)
+    assert alex.checkState(0) == Qt.CheckState.Unchecked
+
+
+def test_reticking_a_person_brings_back_all_their_accounts(qtbot) -> None:
+    sidebar, alex, _sam = _sidebar(qtbot)
+    alex.child(0).setCheckState(0, Qt.CheckState.Unchecked)
+    with qtbot.waitSignal(sidebar.selectionChanged, timeout=1000) as signal:
+        alex.setCheckState(0, Qt.CheckState.Checked)
+    assert signal.args == [frozenset({"a-tfsa", "a-rrsp", "s-fhsa"})]
+
+
+def test_one_click_on_a_person_is_one_dashboard_update(qtbot) -> None:
+    # Qt reports each account a person-click changes; they are coalesced, or
+    # the dashboard would re-render once per account.
+    sidebar, alex, _sam = _sidebar(qtbot)
+    emitted: list[frozenset[str]] = []
+    sidebar.selectionChanged.connect(emitted.append)
+    alex.setCheckState(0, Qt.CheckState.Unchecked)
+    qtbot.wait(50)
+    assert emitted == [frozenset({"s-fhsa"})]
+
+
+def test_rebuilding_the_tree_does_not_announce_a_selection(qtbot) -> None:
+    sidebar, _alex, _sam = _sidebar(qtbot)
+    emitted: list[frozenset[str]] = []
+    sidebar.selectionChanged.connect(emitted.append)
+    sidebar.set_model(sidebar_model_with_one_person())
+    qtbot.wait(50)
+    assert emitted == []
+
+
+def sidebar_model_with_one_person():
+    from moneytor.ui.viewmodels import SidebarAccount, SidebarModel, SidebarPerson
+
+    return SidebarModel(
+        people=(
+            SidebarPerson(id="alex", name="Alex", accounts=(SidebarAccount(id="x", label="TFSA"),)),
+        )
+    )
+
+
+def test_unticking_in_the_sidebar_filters_the_whole_window(qtbot) -> None:
+    window = _window(qtbot)
+    person = window.sidebar._tree.topLevelItem(0)
+    tfsa = next(
+        person.child(i)
+        for i in range(person.childCount())
+        if person.child(i).data(0, Qt.ItemDataRole.UserRole) == "qt-tfsa-ramin"
+    )
+    for i in range(person.childCount()):
+        child = person.child(i)
+        if child is not tfsa:
+            child.setCheckState(0, Qt.CheckState.Unchecked)
+    qtbot.waitUntil(lambda: window.dashboard.table.rowCount() == 3, timeout=2000)
+    assert sorted(_column(window.dashboard.table, 0)) == ["CASH:CAD", "SHOP", "VFV"]
+
+
+# --------------------------------------------------------------------------- #
+# Multi-slice account pies
+# --------------------------------------------------------------------------- #
+
+
+def test_a_split_pie_paints_each_accounts_colour(qtbot) -> None:
+    from PySide6.QtGui import QColor
+
+    from moneytor.ui.theme.tokens import DARK
+    from moneytor.ui.widgets.holdings_table import _ACCOUNTS_COLUMN
+
+    # Half TFSA, half RRSP: the pie starts at 12 o'clock and runs clockwise,
+    # so TFSA (listed first) fills the right half and RRSP the left.
+    table = _make_table(qtbot, [_mix_row("HALF", ("TFSA", "0.5"), ("RRSP", "0.5"))])
+    table.resize(1600, 300)
+    table.show()
+    qtbot.waitExposed(table)
+
+    rect = table.visualRect(table.model().index(0, _ACCOUNTS_COLUMN))
+    image = table.viewport().grab().toImage()
+    center = rect.center()
+    right = image.pixelColor(center.x() + 4, center.y())
+    left = image.pixelColor(center.x() - 4, center.y())
+    assert right == QColor(DARK.account_colors[0])  # TFSA
+    assert left == QColor(DARK.account_colors[1])  # RRSP
+
+
+def test_pie_slices_always_close_the_circle(qtbot) -> None:
+    # Thirds don't divide 360*16 evenly; the last slice absorbs the rounding so
+    # no wedge of background shows through at 12 o'clock.
+    from PySide6.QtGui import QColor
+
+    from moneytor.ui.theme.tokens import DARK
+    from moneytor.ui.widgets.holdings_table import _ACCOUNTS_COLUMN
+
+    third = str(Decimal(1) / 3)
+    table = _make_table(qtbot, [_mix_row("T", ("TFSA", third), ("RRSP", third), ("FHSA", third))])
+    table.resize(1600, 300)
+    table.show()
+    qtbot.waitExposed(table)
+    rect = table.visualRect(table.model().index(0, _ACCOUNTS_COLUMN))
+    image = table.viewport().grab().toImage()
+    just_left_of_noon = image.pixelColor(rect.center().x() - 1, rect.center().y() - 5)
+    assert just_left_of_noon == QColor(DARK.account_colors[2])  # FHSA, the last slice

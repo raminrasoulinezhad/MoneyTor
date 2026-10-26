@@ -12,7 +12,8 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtGui import QKeySequence, QResizeEvent, QShortcut
+from PySide6.QtCore import QCoreApplication, Signal
+from PySide6.QtGui import QCloseEvent, QKeySequence, QResizeEvent, QShortcut
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -31,9 +32,11 @@ from PySide6.QtWidgets import (
 from moneytor import __version__
 from moneytor.aggregation import AssetMap, build_snapshot
 from moneytor.autostart import Autostart, AutostartError, autostart_for
+from moneytor.config.errors import ConfigError
 from moneytor.connectors.errors import ConnectorError
 from moneytor.domain.enums import Currency
 from moneytor.domain.models import Person
+from moneytor.fx.errors import FxError
 from moneytor.fx.provider import FxProvider
 from moneytor.reporting import build_report, render_markdown, write_pdf
 from moneytor.ui.theme import Theme, stylesheet_for, tokens_for
@@ -61,6 +64,10 @@ class MainWindow(QMainWindow):
     # lock and autostart state they are driven from; splitting that across
     # smaller objects would only move the wiring somewhere less obvious.
     # pylint: disable=too-many-instance-attributes
+
+    # Emitted when the user asks to close, before anything waits — so the app
+    # can release work that would otherwise keep the fetch thread alive.
+    closing = Signal()
 
     def __init__(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
@@ -90,6 +97,11 @@ class MainWindow(QMainWindow):
         self._loader = loader
         self._clock = clock or _default_clock
         self._worker: FetchWorker | None = None
+        self._close_pending = False
+        # When the data on screen was fetched, and whether it came from the
+        # cache — shown in the toolbar and stamped on exported reports.
+        self._data_as_of: str | None = None
+        self._data_is_cached = False
         self._lock_overlay: LockScreen | None = None
         # Set the first time the window is locked; enables the Log out button.
         self._expected_password: str | None = None
@@ -171,6 +183,11 @@ class MainWindow(QMainWindow):
         self._lock_overlay = overlay
         return overlay
 
+    @property
+    def is_locked(self) -> bool:
+        """True while the password gate covers the window."""
+        return self._lock_overlay is not None
+
     def log_out(self) -> None:
         """Re-lock the window, returning to the password gate.
 
@@ -221,6 +238,36 @@ class MainWindow(QMainWindow):
             self._lock_overlay.deleteLater()
             self._lock_overlay = None
 
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """Close — but never while a refresh is still running.
+
+        Qt aborts the whole process (``QThread: Destroyed while thread is still
+        running``) if a running thread is torn down, so closing mid-refresh used
+        to crash. Instead the window hides at once and closes for real when the
+        fetch returns; its network calls all time out, and :attr:`closing`
+        releases a pending 2FA prompt.
+        """
+        self.closing.emit()
+        worker = self._worker
+        if worker is not None and worker.isRunning():
+            event.ignore()
+            self.hide()
+            if not self._close_pending:
+                self._close_pending = True
+                worker.finished.connect(self._finish_deferred_close)
+            return
+        super().closeEvent(event)
+
+    def _finish_deferred_close(self) -> None:
+        # QThread.finished fires just *before* the thread stops, so wait for it
+        # to stop; otherwise closeEvent still sees it running and defers again.
+        if self._worker is not None:
+            self._worker.wait()
+        self.close()
+        # A window that was already hidden does not count as "the last window
+        # closing", so Qt would never quit on its own; the user asked to.
+        QCoreApplication.quit()
+
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         # Keep the lock overlay covering the full window as it is resized.
@@ -233,6 +280,16 @@ class MainWindow(QMainWindow):
         self._selected_ids = None
         self.sidebar.set_model(_sidebar_model(people, self._provider, self._currency))
         self.refresh()
+
+    def show_cached(self, people: tuple[Person, ...], as_of: str | None) -> None:
+        """Show data loaded from the cache, labelled with when it was fetched.
+
+        Cached prices can be days old; without the label they looked current.
+        """
+        self.set_people(people)
+        self._data_as_of = as_of
+        self._data_is_cached = True
+        self._update_status()
 
     def refresh(self) -> None:
         """Rebuild the view-model for the current selection (KPIs + dashboard)."""
@@ -264,8 +321,14 @@ class MainWindow(QMainWindow):
         Returns the ``(markdown_path, pdf_path)`` written. The Markdown file is
         placed alongside the PDF with a ``.md`` suffix.
         """
+        # Stamp the data's own date, not today's: a report from cached data
+        # used to claim prices were current when they were days old.
+        if self._data_is_cached:
+            as_of = f"{self._data_as_of or 'an unknown date'} (cached)"
+        else:
+            as_of = self._data_as_of or self._clock()
         snapshot = build_snapshot(
-            self._people, self._currency, self._provider, self._asset_map, as_of=self._clock()
+            self._people, self._currency, self._provider, self._asset_map, as_of=as_of
         )
         report = build_report(snapshot, self._provider)
         pdf = Path(pdf_path)
@@ -435,11 +498,31 @@ class MainWindow(QMainWindow):
         self.banner.hide()
         if isinstance(people, tuple):
             self.set_people(people)
-        self._updated_label.setText(f"Updated {self._clock()}")
+        self._data_as_of = self._clock()
+        self._data_is_cached = False
+        self._update_status()
+
+    def _update_status(self) -> None:
+        """The toolbar line: how fresh the data is and the USD/CAD rate used."""
+        if self._data_is_cached:
+            when = self._data_as_of or "an unknown date"
+            text = f"Cached data from {when} — Refresh for live prices"
+        else:
+            text = f"Updated {self._data_as_of}"
+        try:
+            rate = self._provider.get_rate(Currency.USD, Currency.CAD)
+        except FxError:
+            pass  # no USD/CAD rate configured; nothing to show
+        else:
+            # Only the live provider knows whether its rate is the built-in
+            # placeholder; any other provider's rate is taken as given.
+            estimate = " (estimate)" if getattr(self._provider, "is_fallback", False) else ""
+            text += f" · USD/CAD {rate:.4f}{estimate}"
+        self._updated_label.setText(text)
 
     def _on_reload_failed(self, exc: object) -> None:
         self.progress.finish()
-        detail = str(exc) if isinstance(exc, ConnectorError) else "Unexpected error."
+        detail = str(exc) if isinstance(exc, ConnectorError | ConfigError) else "Unexpected error."
         self.banner.show_message(f"Could not refresh data: {detail}")
 
 

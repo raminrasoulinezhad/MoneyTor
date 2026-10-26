@@ -12,6 +12,7 @@ import logging
 import sys
 from collections.abc import Mapping
 from dataclasses import replace
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -26,13 +27,19 @@ from moneytor.aggregation import (
 )
 from moneytor.config.errors import ConfigError
 from moneytor.config.logging import setup_logging
-from moneytor.config.settings import PersonCredentials, Settings, load_settings
+from moneytor.config.settings import (
+    PersonCredentials,
+    Settings,
+    load_settings,
+    read_app_password,
+)
 from moneytor.connectors import (
     Connector,
     MockConnector,
     QuestradeConnector,
     WealthsimpleConnector,
 )
+from moneytor.connectors.errors import ConnectorError
 from moneytor.connectors.wealthsimple import OtpProvider
 from moneytor.domain.enums import Institution
 from moneytor.domain.models import Account, Person
@@ -143,7 +150,7 @@ def _connectors_for(
         # which account the code is for.
         account_otp: OtpProvider | None = otp_provider
         if isinstance(otp_provider, GuiOtpProvider):
-            account_otp = otp_provider.for_account(creds.person_id, creds.wealthsimple_email)
+            account_otp = otp_provider.for_account(creds.display_name, creds.wealthsimple_email)
         connectors.append(
             WealthsimpleConnector(
                 person_id=creds.person_id,
@@ -154,6 +161,21 @@ def _connectors_for(
             )
         )
     return connectors
+
+
+def _fetch(creds: PersonCredentials, connector: Connector) -> tuple[Account, ...]:
+    """Log in and fetch one person's accounts at one broker.
+
+    A failure is re-raised as the same error type, prefixed with whose login it
+    was: with two people at one broker, "Questrade rejected the refresh token"
+    alone does not say which token to renew.
+    """
+    try:
+        connector.authenticate()
+        return connector.fetch_accounts()
+    except ConnectorError as exc:
+        institution = connector.institution.value.capitalize()
+        raise type(exc)(f"{creds.display_name}'s {institution}: {exc}") from exc
 
 
 def live_people(
@@ -184,12 +206,20 @@ def live_people(
 
     accounts_by_person: dict[str, list[Account]] = {}
     names = {creds.person_id: creds.display_name for creds in settings.people}
+    seen: set[tuple[Institution, str]] = set()
     for done, (creds, connector) in enumerate(jobs):
         if report is not None:
             institution = connector.institution.value.capitalize()
             report(done, total, f"Fetching {creds.display_name} — {institution}")
-        connector.authenticate()
-        accounts_by_person.setdefault(creds.person_id, []).extend(connector.fetch_accounts())
+        for account in _fetch(creds, connector):
+            # A joint account shows up in both holders' logins with the same
+            # number; counting it under each would double it in every total.
+            key = (account.institution, account.id)
+            if key in seen:
+                _LOG.info("Skipping a %s account already loaded.", account.institution.value)
+                continue
+            seen.add(key)
+            accounts_by_person.setdefault(creds.person_id, []).append(account)
     if report is not None:
         report(total, total, "Finalizing")
 
@@ -200,25 +230,40 @@ def live_people(
     )
 
 
-def _load_settings_safely() -> Settings:
-    """Load settings, degrading to demo mode (no people) on a config error."""
+def _load_settings_safely() -> tuple[Settings, ConfigError | None]:
+    """Load settings, or report why they could not be loaded.
+
+    On a config error the app still opens — the user needs to see the message —
+    but with no credentials, and with the password gate recovered on its own so
+    a typo elsewhere in ``.env`` cannot open the portfolio unlocked.
+    """
     try:
-        return load_settings()
+        return load_settings(), None
     except ConfigError as exc:
-        _LOG.error("Invalid configuration; starting in demo mode: %s", exc)
-        return Settings()
+        _LOG.error("Invalid configuration: %s", exc)
+        return Settings(app_password=read_app_password()), exc
 
 
 def run_app(argv: list[str] | None = None) -> int:
-    """Create the QApplication, show the cockpit, and run the event loop.
+    """Create the QApplication, show the cockpit, and run the event loop."""
+    app = QApplication.instance() or QApplication(argv or sys.argv)
+    _window = build_window()  # held so the window lives as long as the event loop
+    return app.exec()
+
+
+def build_window() -> MainWindow:
+    """Wire settings, cache, connectors and the window; show it, and return it.
+
+    Everything ``run_app`` does short of entering the event loop, so tests can
+    drive real start-up end to end. Paths (``.env``, ``.cache/``) resolve
+    against the working directory.
 
     Cold-starts from the snapshot cache when present (instant, offline). When
     credentials are configured in ``.env`` the Refresh button (and an automatic
     cold-start fetch) pulls live data through the real connectors; otherwise the
     app stays in demo mode with the bundled fixture.
     """
-    app = QApplication.instance() or QApplication(argv or sys.argv)
-    settings = _load_settings_safely()
+    settings, config_error = _load_settings_safely()
     # Configure logging with secret redaction before anything can log.
     setup_logging(settings.log_level, settings.secret_values())
     currency = settings.display_currency
@@ -234,17 +279,22 @@ def run_app(argv: list[str] | None = None) -> int:
     sector_map = _load_sector_map()
 
     def loader(report: ProgressFn | None = None) -> tuple[Person, ...]:
+        if config_error is not None:
+            # Never fall back to the demo portfolio here: it used to be fetched
+            # and then saved over the user's real cache.
+            raise config_error
         provider.refresh()  # off the UI thread, alongside the data fetch
-        if has_credentials:
-            fetched = live_people(settings, token_store, otp_provider, report=report)
-        else:
+        if not has_credentials:
             if report is not None:
                 report(0, 1, "Loading demo portfolio")
-            fetched = demo_people()
+            demo = apply_sector_map(demo_people(), sector_map)
             if report is not None:
                 report(1, 1, "Loading demo portfolio")
+            return demo  # demo data is never cached
+        fetched = live_people(settings, token_store, otp_provider, report=report)
         fetched = apply_sector_map(fetched, sector_map)
-        cache.save(fetched, currency)
+        fetched_at = datetime.now().strftime("%Y-%m-%d %H:%M")
+        cache.save(fetched, currency, as_of=fetched_at, usd_cad=provider.usd_cad)
         return fetched
 
     # Build the cockpit empty and show it maximized first, so the password gate
@@ -258,6 +308,12 @@ def run_app(argv: list[str] | None = None) -> int:
         asset_map=_load_asset_map(),
     )
     otp_provider.parent_widget = window  # center the 2FA dialog on the window
+    window.closing.connect(otp_provider.cancel)
+    if config_error is not None:
+        window.banner.show_message(
+            f"There is a problem in your .env file: {config_error} "
+            "Fix it and restart MoneyTor. Refresh is off until then."
+        )
     # Open filling the screen; the resize() in MainWindow is the restored-down size.
     window.showMaximized()
 
@@ -267,9 +323,13 @@ def run_app(argv: list[str] | None = None) -> int:
         # would otherwise stay "Unknown" until the next live fetch.
         cached = cache.load()
         if cached is not None:
+            # Value cached prices at the rate they were fetched with, not the
+            # built-in placeholder: the two only agree by coincidence.
+            if cached.usd_cad is not None:
+                provider.use_rate(cached.usd_cad)
             people = apply_configured_names(cached.people, settings)
-            window.set_people(apply_sector_map(people, sector_map))
-        elif not has_credentials:
+            window.show_cached(apply_sector_map(people, sector_map), cached.as_of)
+        elif not has_credentials and config_error is None:
             window.set_people(apply_sector_map(demo_people(), sector_map))
         # With credentials but no cache, fetch live immediately (off-thread, with
         # the loading state and error banner) so the user sees real data on launch.
@@ -285,4 +345,4 @@ def run_app(argv: list[str] | None = None) -> int:
     else:
         load_data()
 
-    return app.exec()
+    return window

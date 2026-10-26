@@ -13,7 +13,7 @@ means "show everything" (handled by the window).
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QLabel,
     QTreeWidget,
@@ -48,6 +48,7 @@ class Sidebar(QWidget):
         title = QLabel("Accounts")
         title.setObjectName("SidebarTitle")
 
+        self._emit_pending = False
         self._tree = QTreeWidget()
         self._tree.setHeaderHidden(True)
         self._tree.itemChanged.connect(self._on_item_changed)
@@ -61,7 +62,14 @@ class Sidebar(QWidget):
         self._tree.clear()
         for person in model.people:
             person_item = QTreeWidgetItem([person.name])
-            person_item.setFlags(person_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            # Auto-tristate keeps the person in step with their accounts both
+            # ways: ticking the person ticks every account, and unticking some
+            # accounts shows the person as partly ticked (it used to stay ✓).
+            person_item.setFlags(
+                person_item.flags()
+                | Qt.ItemFlag.ItemIsUserCheckable
+                | Qt.ItemFlag.ItemIsAutoTristate
+            )
             person_item.setCheckState(0, Qt.CheckState.Checked)
             for account in person.accounts:
                 account_item = QTreeWidgetItem([account.label])
@@ -89,13 +97,14 @@ class Sidebar(QWidget):
                     selected.add(account_id)
         return frozenset(selected)
 
-    def _on_item_changed(self, item: QTreeWidgetItem, _column: int) -> None:
-        # Toggling a person cascades to its accounts.
-        if item.childCount() > 0:
-            self._tree.blockSignals(True)
-            for j in range(item.childCount()):
-                child = item.child(j)
-                if child is not None:
-                    child.setCheckState(0, item.checkState(0))
-            self._tree.blockSignals(False)
+    def _on_item_changed(self, _item: QTreeWidgetItem, _column: int) -> None:
+        # One click on a person changes every account under it, and Qt reports
+        # each change separately. Coalesce them into one selection update, or
+        # the dashboard would re-render once per account.
+        if not self._emit_pending:
+            self._emit_pending = True
+            QTimer.singleShot(0, self._emit_selection)
+
+    def _emit_selection(self) -> None:
+        self._emit_pending = False
         self.selectionChanged.emit(self.selected_account_ids())

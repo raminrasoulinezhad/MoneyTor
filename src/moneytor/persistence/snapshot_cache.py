@@ -23,6 +23,8 @@ from moneytor.domain.enums import AccountType, AssetClass, Currency, Institution
 from moneytor.domain.models import Account, Holding, Person
 from moneytor.domain.money import Money
 
+from ._private_file import write_private
+
 DEFAULT_CACHE_PATH = Path(".cache") / "snapshot.json"
 # Version stamped into every cache we write.
 _SCHEMA_VERSION = 5
@@ -47,6 +49,9 @@ class CachedPortfolio:
     people: tuple[Person, ...]
     display_currency: Currency
     as_of: str | None = field(default=None)
+    # The USD->CAD rate the cached prices were valued at, so a cached launch
+    # converts at that rate rather than a hard-coded fallback.
+    usd_cad: Decimal | None = field(default=None)
 
 
 def _money_dict(money: Money) -> dict[str, str]:
@@ -127,6 +132,16 @@ def _person(node: Any) -> Person:
     )
 
 
+def _rate(node: Any) -> Decimal | None:
+    """A cached FX rate, or None when absent (caches written before v1.7)."""
+    if node is None:
+        return None
+    rate = Decimal(str(node))
+    if not rate.is_finite() or rate <= 0:
+        raise ValueError(f"Invalid cached USD->CAD rate: {node!r}.")
+    return rate
+
+
 class SnapshotCache:
     """Reads/writes a portfolio cache as JSON."""
 
@@ -138,18 +153,22 @@ class SnapshotCache:
         people: tuple[Person, ...],
         display_currency: Currency,
         as_of: str | None = None,
+        usd_cad: Decimal | None = None,
     ) -> None:
-        """Serialize ``people`` and metadata to the cache file."""
+        """Serialize ``people`` and metadata to the cache file.
+
+        ``as_of`` is when the data was fetched and ``usd_cad`` the rate it was
+        valued at; both are shown again on a cached launch.
+        """
         data = {
             "version": _SCHEMA_VERSION,
             "display_currency": display_currency.value,
             "as_of": as_of,
+            "usd_cad": str(usd_cad) if usd_cad is not None else None,
             "people": [_person_dict(p) for p in people],
         }
-        # Holds full portfolio data; keep it owner-only.
-        self._path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self._path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        self._path.chmod(0o600)
+        # Holds full portfolio data: owner-only, and never left half-written.
+        write_private(self._path, json.dumps(data, indent=2))
 
     def load(self) -> CachedPortfolio | None:
         """Return the cached portfolio, or ``None`` if missing/corrupt."""
@@ -164,6 +183,7 @@ class SnapshotCache:
                 people=tuple(_person(p) for p in data["people"]),
                 display_currency=Currency(data["display_currency"]),
                 as_of=data.get("as_of"),
+                usd_cad=_rate(data.get("usd_cad")),
             )
         except (
             OSError,

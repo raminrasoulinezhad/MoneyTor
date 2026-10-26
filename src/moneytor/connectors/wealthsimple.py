@@ -47,7 +47,7 @@ from moneytor.domain.models import Account, Holding
 from moneytor.domain.money import Money
 from moneytor.persistence.token_store import TokenStore
 
-from ._parse import to_decimal, to_money
+from ._parse import account_type_for, to_decimal, to_money
 from .errors import AuthError, ConnectorError, FetchError, RateLimitError
 
 _BASE_URL = "https://api.production.wealthsimple.com/v1/"
@@ -370,7 +370,7 @@ class WealthsimpleConnector:
             id=account_id,
             person_id=self._person_id,
             institution=Institution.WEALTHSIMPLE,
-            account_type=_ACCOUNT_TYPES.get(str(node.get("type")), AccountType.CASH),
+            account_type=account_type_for(_ACCOUNT_TYPES, node.get("type"), "Wealthsimple"),
             cash=cash,
             holdings=holdings,
         )

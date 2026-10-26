@@ -34,6 +34,21 @@ dashboard with charts and exportable reports.
 | **Sidebar** (left) | Toggle people and accounts on and off |
 | **⚙ Settings** (top right) | Theme, private mode, start at login, export |
 
+### Reading the numbers
+
+- **Top bar:** when the data was fetched, and the USD/CAD rate used
+  - `Updated 14:05 · USD/CAD 1.3987` — live data
+  - `Cached data from 2026-10-14 21:03 — Refresh for live prices` — the last
+    fetch, shown instantly on launch. Prices may be out of date
+  - `(estimate)` after the rate — no real rate yet; press Refresh
+- **Cash** has its own rows (`CASH:CAD`, `CASH:USD`), so the table always adds
+  up to the total. Margin debt shows as a negative cash row
+- **Avg Paid** is what you paid per share, from your broker's records
+  - `—` — your broker has no cost on record (common for transferred-in shares)
+  - `*` — only some shares have a cost on record; hover for details
+- **Joint accounts** that both of you can log in to are counted once
+- Exported reports carry the data's own date, marked `(cached)` when it is
+
 ### The Accounts pie
 
 Each row's pie shows how that holding splits across account types, by value:
@@ -44,7 +59,7 @@ Each row's pie shows how that holding splits across account types, by value:
 | 🔵 Blue | RRSP (including spousal) |
 | 🟠 Amber | FHSA |
 | 🟣 Violet | Margin & Cash (non-registered) |
-| ⚪ Grey | Other (managed, GIC) |
+| ⚪ Grey | Other (RESP, LIRA, RRIF, managed, anything unrecognised) |
 
 - Hover a pie for the exact split; hover the column header for the key
 - Click the header to group rows by their main account type
@@ -222,6 +237,8 @@ should equal today's USD/CAD rate.
 | --- | --- |
 | `command not found: uv` | Restart your terminal after installing uv |
 | Login fails or asks for a code | Wealthsimple 2FA — enter the texted code when prompted |
+| "Could not refresh: Sam's Questrade: …" | That person's Questrade token expired — paste a new one into `.env` |
+| "There is a problem in your .env file" | Fix the key it names and restart. Your data stays as it was; Refresh is off until then |
 | A person won't load | They need *either* a Questrade token *or* both a Wealthsimple email **and** password |
 | Values won't unhide | Private mode needs `MONEYTOR_APP_PASSWORD` — the same one used on launch |
 | A holding shows the wrong sector | Add it to `.cache/sectors.json` — see [Fixing a wrong sector](#fixing-a-wrong-sector) |

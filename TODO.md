@@ -1,6 +1,6 @@
 # TODO
 
-Known gaps as of **v1.4.0**. Nothing here blocks using the app — it all runs,
+Known gaps as of **v1.7.0**. Nothing here blocks using the app — it all runs,
 and the full suite is green.
 
 ---
@@ -16,9 +16,14 @@ run on the OS it targets. The Linux backend is verified end to end
 
 ## Nice to have
 
-- **Coverage gaps** (90% overall): `ui/app.py` 33%, `ui/widgets/sidebar.py` 54%.
-  These are the hardest paths to drive headlessly, but the sidebar's
-  tree-building logic is testable
+- **One failed login blocks the whole refresh.** If one person's token has
+  expired, nobody's data refreshes. Keeping the others' fresh data would need
+  clear marking of which parts are stale
+- **Questrade account-type codes are unverified.** FHSA, RESP, LIRA and RRIF
+  are mapped from memory (their docs block automated reads). An unrecognised
+  type now shows as "Other" with a logged warning, never as Cash
+- **Unticking every account shows everything**, not nothing — by design, but
+  surprising
 - **Chart values live in the page even in private mode.** The donut renders only
   symbol + percentage, so nothing is on screen — but Plotly embeds the raw
   amounts as figure data, readable by anyone with devtools. Feeding it allocation

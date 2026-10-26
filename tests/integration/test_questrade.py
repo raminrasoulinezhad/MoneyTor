@@ -237,3 +237,47 @@ def test_rate_limit_raises(tmp_path: Path) -> None:
     connector.authenticate()
     with pytest.raises(RateLimitError):
         connector.fetch_accounts()
+
+
+@pytest.mark.parametrize(
+    ("questrade_type", "expected"),
+    [
+        ("FHSA", AccountType.FHSA),
+        ("RESP", AccountType.RESP),
+        ("FRESP", AccountType.RESP),
+        ("LIRA", AccountType.LIRA),
+        ("RRIF", AccountType.RRIF),
+        ("LIF", AccountType.RRIF),
+        ("SRRSP", AccountType.SPOUSAL_RRSP),
+    ],
+)
+def test_registered_account_types_are_recognised(
+    tmp_path: Path, questrade_type: str, expected: AccountType
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/v1/accounts"):
+            return httpx.Response(
+                200,
+                json={"accounts": [{"type": questrade_type, "number": "1", "status": "Active"}]},
+            )
+        return _handler(request)
+
+    connector = _connector(tmp_path, handler)
+    connector.authenticate()
+    assert connector.fetch_accounts()[0].account_type is expected
+
+
+def test_unknown_account_type_is_other_not_cash(tmp_path: Path, caplog) -> None:
+    # It used to default to CASH, filing any registered account we hadn't
+    # listed as non-registered.
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/v1/accounts"):
+            return httpx.Response(
+                200, json={"accounts": [{"type": "NEWTYPE", "number": "1", "status": "Active"}]}
+            )
+        return _handler(request)
+
+    connector = _connector(tmp_path, handler)
+    connector.authenticate()
+    assert connector.fetch_accounts()[0].account_type is AccountType.OTHER
+    assert "NEWTYPE" in caplog.text

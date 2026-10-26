@@ -76,6 +76,10 @@ _HEADER_TOOLTIPS = {
     8: "Current price per share, in the security's own currency",
     9: "Average price paid per share, in the security's own currency",
 }
+_PARTIAL_COST_TIP = (
+    "Average of the shares whose cost your broker reported. Some shares have "
+    "no cost on record (often ones transferred in from another broker)."
+)
 _VALUE_COLUMN = 5  # default sort column (descending)
 _ACCOUNTS_COLUMN = 10
 # Fractional share counts carry a dozen decimals from the broker; two is plenty.
@@ -277,6 +281,10 @@ class HoldingsTable(QTableWidget):
             self._set(r, 7, row.high_52w_text, right)
             self._set(r, 8, row.unit_price_text, right)
             self._set(r, 9, row.avg_cost_text, right)
+            if row.avg_cost_partial:
+                partial = self.item(r, 9)
+                if partial is not None:
+                    partial.setToolTip(_PARTIAL_COST_TIP)
             # Shares only, never amounts, so the pie stays visible in private mode.
             self._set(r, _ACCOUNTS_COLUMN, "")
             mix_item = self.item(r, _ACCOUNTS_COLUMN)

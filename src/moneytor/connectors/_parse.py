@@ -13,13 +13,17 @@ straight into typed domain models.
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Mapping
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from moneytor.domain.enums import Currency
+from moneytor.domain.enums import AccountType, Currency
 from moneytor.domain.money import Money
 
 from .errors import FetchError
+
+_LOG = logging.getLogger(__name__)
 
 
 def to_decimal(value: Any, where: str) -> Decimal:
@@ -50,3 +54,17 @@ def to_money(node: Any, where: str) -> Money:
     if not isinstance(node, dict):
         raise FetchError(f"Expected a money object at {where}: {node!r}.")
     return Money(to_decimal(node.get("amount"), where), to_currency(node.get("currency"), where))
+
+
+def account_type_for(known: Mapping[str, AccountType], raw: Any, broker: str) -> AccountType:
+    """Map a broker's account-type string, falling back to ``OTHER`` — loudly.
+
+    An unrecognised type used to default to CASH, filing a registered account
+    (a Questrade FHSA, say) as non-registered. ``OTHER`` makes no such claim,
+    and the warning names the string so it can be added to the table.
+    """
+    account_type = known.get(str(raw))
+    if account_type is None:
+        _LOG.warning("Unrecognised %s account type %r; showing it as Other.", broker, raw)
+        return AccountType.OTHER
+    return account_type

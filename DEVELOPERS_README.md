@@ -43,6 +43,7 @@ src/
 tests/
   unit/                  pure logic
   integration/           connectors and GUI
+  e2e/                   real start-up against a throwaway .env and cache
   fixtures/              sanitized broker payloads
 ```
 
@@ -97,6 +98,13 @@ version lives — `pyproject.toml` reads it from there. Bump it per semver:
 - GUI tests run offscreen via `pytest-qt`; `conftest.py` sets `QT_QPA_PLATFORM`
 - Autostart tests write to `tmp_path` and a fake registry, so they never touch
   your real login session
+- End-to-end tests call `ui.app.build_window()` — everything `run_app` does
+  except the event loop — in a temporary working directory, so they exercise
+  the real `.env`, cache and password gate without touching yours
+- `test_invariants.py` checks rules that must hold for any portfolio (the table
+  adds up to the total, allocations sum to one, …) across 25 random ones
+- A hung test (a thread waiting on a dialog nobody answers) stalls the run;
+  wrap ad-hoc runs in `timeout 300`
 
 ---
 
@@ -115,6 +123,8 @@ Two workflows, both on push and pull request:
   `pyproject.toml`
 - `pylint --fail-under=10` turns its floating score into a real gate: `src/` is
   at 10.00, so any new warning fails the build
+  - Check its **exit code** locally, not the score: it can print `10.00/10`
+    and still exit non-zero. Piping it through `tail` hides that
 
 ---
 

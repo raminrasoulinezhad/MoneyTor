@@ -30,10 +30,36 @@ from .merge import merge_holdings
 from .normalize import AssetMap
 
 
+def account_positions(account: Account) -> tuple[Holding, ...]:
+    """The account's holdings plus its main-currency cash, as a ``CASH:`` line.
+
+    Connectors keep an account's primary-currency cash in ``Account.cash`` and
+    other currencies as ``CASH:<currency>`` holdings. Totals count both, but
+    only holdings reached the table — so CAD cash was in the headline total and
+    nowhere in the table, and every allocation was a share of a smaller base.
+    A negative balance (margin debt) is kept negative, not hidden.
+    """
+    cash = account.cash
+    if cash.amount == 0:
+        return account.holdings
+    line = Holding(
+        symbol=f"CASH:{cash.currency.value}",
+        exchange="",
+        asset_class=AssetClass.CASH,
+        quantity=cash.amount,
+        book_value=cash,
+        market_value=cash,
+    )
+    return (*account.holdings, line)
+
+
 def collect_holdings(people: Sequence[Person]) -> tuple[Holding, ...]:
-    """Flatten every holding across all people and accounts."""
+    """Flatten every position — holdings and cash — across people and accounts."""
     return tuple(
-        holding for person in people for account in person.accounts for holding in account.holdings
+        position
+        for person in people
+        for account in person.accounts
+        for position in account_positions(account)
     )
 
 
@@ -162,7 +188,7 @@ def value_by_account_type(
     result: dict[str, dict[AccountType, Money]] = {}
     for person in people:
         for account in person.accounts:
-            for holding in account.holdings:
+            for holding in account_positions(account):
                 symbol = asset_map.canonical(holding.symbol)
                 values = result.setdefault(symbol, {})
                 value = convert(holding.market_value, target, provider)

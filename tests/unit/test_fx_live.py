@@ -102,3 +102,47 @@ def test_snapshot_drives_conversion() -> None:
     provider = SnapshotFxProvider(Decimal("1.30"))
     converted = convert(Money.of("100.00", USD), CAD, provider)
     assert converted == Money.of("130.00", CAD)
+
+
+@pytest.mark.parametrize("rate", [0.0001, 0.79, 2.01, 139.5, -1.36])
+def test_fetch_rejects_rates_no_real_market_would_quote(rate: float) -> None:
+    # A misread response (cents for dollars, an inverted pair) would otherwise
+    # revalue every USD holding; keeping the previous rate is safer.
+    client = _client(lambda r: httpx.Response(200, json={"rates": {"CAD": rate}}))
+    with pytest.raises(FxError, match="Implausible"):
+        fetch_usd_cad(client)
+
+
+@pytest.mark.parametrize("rate", [0.8, 0.96, 1.62, 2.0])
+def test_fetch_accepts_the_whole_plausible_range(rate: float) -> None:
+    client = _client(lambda r: httpx.Response(200, json={"rates": {"CAD": rate}}))
+    assert fetch_usd_cad(client) == Decimal(str(rate))
+
+
+def test_snapshot_reports_the_rate_in_use_and_whether_it_is_a_placeholder() -> None:
+    provider = SnapshotFxProvider(Decimal("1.36"), fetcher=lambda: Decimal("1.40"))
+    assert provider.usd_cad == Decimal("1.36")
+    assert provider.is_fallback
+
+    provider.refresh()
+    assert provider.usd_cad == Decimal("1.40")
+    assert not provider.is_fallback
+
+
+def test_snapshot_can_adopt_the_rate_cached_data_was_valued_at() -> None:
+    provider = SnapshotFxProvider(Decimal("1.36"))
+    provider.use_rate(Decimal("1.4123"))
+    assert provider.usd_cad == Decimal("1.4123")
+    assert not provider.is_fallback
+    assert convert(Money.of("100", Currency.USD), Currency.CAD, provider) == Money.of(
+        "141.23", Currency.CAD
+    )
+
+
+def test_failed_refresh_keeps_a_placeholder_flagged_as_one() -> None:
+    def broken() -> Decimal:
+        raise FxError("offline")
+
+    provider = SnapshotFxProvider(Decimal("1.36"), fetcher=broken)
+    provider.refresh()
+    assert provider.is_fallback
